@@ -2,10 +2,13 @@
 notify.py — Slack webhook + SMTP email notifications.
 """
 import json
+import ipaddress
 import logging
+import re
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from urllib.parse import urlparse
 
 import requests
 
@@ -34,7 +37,31 @@ def _severity_color(score: int) -> str:
     return "#e05252"
 
 
+def _validate_webhook_url(url: str) -> bool:
+    """Validate that the Slack webhook URL is a legitimate HTTPS URL and not an internal address."""
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme != "https":
+            return False
+        hostname = parsed.hostname or ""
+        # Reject localhost and private/loopback ranges
+        if hostname in ("localhost", "127.0.0.1", "::1"):
+            return False
+        try:
+            addr = ipaddress.ip_address(hostname)
+            if addr.is_private or addr.is_loopback or addr.is_link_local:
+                return False
+        except ValueError:
+            pass  # hostname is a domain name, not an IP — allow
+        return bool(hostname)
+    except Exception:
+        return False
+
+
 def _slack_post(webhook: str, payload: dict) -> bool:
+    if not _validate_webhook_url(webhook):
+        log.error("Slack webhook URL rejected (must be a public HTTPS URL): %s", webhook[:80])
+        return False
     try:
         resp = requests.post(webhook, json=payload, timeout=10)
         return resp.status_code == 200

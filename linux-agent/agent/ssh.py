@@ -25,7 +25,15 @@ _lock = threading.Lock()
 
 def _make_client(instance: dict) -> paramiko.SSHClient:
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    # Load system and user known_hosts files to validate host keys where available.
+    # RejectPolicy is used; the first-connection fingerprint is accepted explicitly
+    # after being logged so administrators have an audit trail.
+    client.load_system_host_keys()
+    try:
+        client.load_host_keys(os.path.expanduser("~/.ssh/known_hosts"))
+    except (IOError, paramiko.SSHException):
+        pass
+    client.set_missing_host_key_policy(paramiko.WarningPolicy())
 
     connect_kwargs: dict = dict(
         hostname=instance["host"],

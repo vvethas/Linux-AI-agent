@@ -46,7 +46,9 @@ def _ok(data=None, **kwargs):
 
 
 def _err(message: str, code: int = 400):
-    return jsonify({"ok": False, "error": message}), code
+    # Sanitize: truncate to 300 chars and strip potential stack-trace lines
+    safe = str(message).split("\n")[0][:300]
+    return jsonify({"ok": False, "error": safe}), code
 
 
 def _require_instance(instance_id):
@@ -715,7 +717,7 @@ def scheduler_jobs():
 def _bootstrap():
     db.init_db()
     _scheduler.start()
-    log.info("Database initialised")
+    log.info("Database initialized")
 
 
 if __name__ == "__main__":
