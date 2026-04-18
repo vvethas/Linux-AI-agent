@@ -362,7 +362,7 @@ window.addEventListener('DOMContentLoaded', () => {
   loadDashboard();
   loadNotifyConfig();
   setInterval(loadInstances, 30000);
-  setInterval(() => { if (document.getElementById('tab-dashboard').style.display !== 'none') loadDashboard(); }, 60000);
+  setInterval(() => { if (!document.getElementById('tab-dashboard').classList.contains('hidden')) loadDashboard(); }, 60000);
 });
 
 // ── Tab switching ────────────────────────────────────────────────────────────
@@ -554,7 +554,7 @@ async function sendChat() {
 
   // If we have an active plan waiting for approval, check for "approve" or step execution
   if (chatPlan && chatPlan._waiting_approval) {
-    if (/approve|yes|ok|go|run|execute/i.test(text)) {
+    if (/^(approve|yes|ok|go|run|execute)$/i.test(text.trim())) {
       chatPlan._waiting_approval = false;
       await executePlan();
     } else {
@@ -903,7 +903,7 @@ async function triggerNow() {
 
 // ── Utility ───────────────────────────────────────────────────────────────────
 function esc(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 function fmtDate(iso) {
   if (!iso) return '–';

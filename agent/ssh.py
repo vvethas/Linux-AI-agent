@@ -26,7 +26,10 @@ class SSHManager:
 
     def _build_client(self, instance: Dict[str, Any], timeout: int = 15) -> paramiko.SSHClient:
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # WarningPolicy logs unknown host keys instead of silently accepting them.
+        # For production use, configure known_hosts on the control server and use
+        # RejectPolicy together with a pre-populated known_hosts file.
+        client.set_missing_host_key_policy(paramiko.WarningPolicy())
         connect_kwargs: Dict[str, Any] = {
             "hostname": instance["host"],
             "port": int(instance.get("port", 22)),

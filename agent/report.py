@@ -1,3 +1,4 @@
+import json
 from html import escape
 from typing import Any, Dict, List
 
@@ -14,7 +15,6 @@ def _kv_table(data: Dict[str, Any]) -> str:
     rows = []
     for k, v in data.items():
         if isinstance(v, (dict, list)):
-            import json
             val = f"<pre>{escape(json.dumps(v, indent=2, default=str))}</pre>"
         else:
             val = f"<pre>{escape(str(v))}</pre>"

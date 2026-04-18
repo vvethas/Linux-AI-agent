@@ -1,5 +1,9 @@
 import sys
 import os
+import logging
+
+log = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # Ensure the project root is on the path when running web/server.py directly
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -44,7 +48,13 @@ sessions: Dict[int, Dict[str, Any]] = {}
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _err(message: str, status: int = 400):
+    # Avoid exposing raw exception details to callers
     return jsonify({"error": message}), status
+
+
+def _safe_err(exc: Exception, status: int = 500):
+    """Return a sanitized error — never leak raw stack-trace text to clients."""
+    return jsonify({"error": "An internal error occurred. Check server logs."}), status
 
 
 def _get_instance(instance_id: int) -> Optional[Dict[str, Any]]:
@@ -110,7 +120,7 @@ def instance_diagnostics(instance_id: int):
     try:
         return jsonify({"diagnostics": ssh.collect_diagnostics(instance)})
     except Exception as exc:
-        return _err(str(exc), 500)
+        log.exception("Internal error"); return _safe_err(exc, 500)
 
 
 @app.route("/api/instances/<int:instance_id>/study", methods=["POST"])
@@ -131,7 +141,7 @@ def run_study(instance_id: int):
         notifier.notify_study_complete(instance, result["report"])
         return jsonify(result)
     except Exception as exc:
-        return _err(str(exc), 500)
+        log.exception("Internal error"); return _safe_err(exc, 500)
 
 
 # ── Schedule ──────────────────────────────────────────────────────────────────
@@ -230,7 +240,7 @@ def classify():
     try:
         intent = claude.classify_intent(text)
     except Exception as exc:
-        return _err(str(exc), 500)
+        log.exception("Internal error"); return _safe_err(exc, 500)
     return jsonify({"intent": intent})
 
 
@@ -251,7 +261,7 @@ def diagnose():
         diagnostics = ssh.collect_diagnostics(instance)
         plan = claude.troubleshoot_plan(issue, diagnostics)
     except Exception as exc:
-        return _err(str(exc), 500)
+        log.exception("Internal error"); return _safe_err(exc, 500)
 
     title = f"Troubleshoot: {issue[:80]}" if issue else "Troubleshoot"
     job_id = db.create_job(
@@ -365,7 +375,7 @@ def build_plan():
         specs = ssh.collect_specs(instance)
         plan = claude.build_plan(request_text, specs)
     except Exception as exc:
-        return _err(str(exc), 500)
+        log.exception("Internal error"); return _safe_err(exc, 500)
 
     title = f"Build: {request_text[:80]}" if request_text else "Build"
     job_id = db.create_job(
@@ -496,7 +506,7 @@ def replicate_plan():
             source_study.get("report_json", {}), target_instance, target_specs
         )
     except Exception as exc:
-        return _err(str(exc), 500)
+        log.exception("Internal error"); return _safe_err(exc, 500)
 
     title = f"Replicate {source_instance_id} → {target_instance_id}"
     job_id = db.create_job(
@@ -587,7 +597,7 @@ def replicate_playbook(job_id: int):
             path = replicator.save_playbook(instance, playbook)
             return jsonify({"playbook": playbook, "saved_path": path})
         except Exception as exc:
-            return _err(str(exc), 500)
+            log.exception("Internal error"); return _safe_err(exc, 500)
 
     return jsonify({"playbook": playbook})
 

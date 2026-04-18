@@ -9,6 +9,15 @@ if ! command -v python3 &>/dev/null; then
   exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${SCRIPT_DIR}/.env"
+
+# Load existing .env if present
+if [ -f "$ENV_FILE" ]; then
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+fi
+
 # Prompt for API key if not set
 if [ -z "$ANTHROPIC_API_KEY" ]; then
   echo -n "Enter your Anthropic API key: "
@@ -19,12 +28,12 @@ if [ -z "$ANTHROPIC_API_KEY" ]; then
     exit 1
   fi
   export ANTHROPIC_API_KEY
-  # Persist to ~/.bashrc so future shells pick it up automatically
-  grep -qxF "export ANTHROPIC_API_KEY=\"${ANTHROPIC_API_KEY}\"" ~/.bashrc 2>/dev/null \
-    || echo "export ANTHROPIC_API_KEY=\"${ANTHROPIC_API_KEY}\"" >> ~/.bashrc
+  # Persist to a dedicated .env file with owner-only read permissions
+  printf 'export ANTHROPIC_API_KEY="%s"\n' "$ANTHROPIC_API_KEY" > "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+  echo ">> API key saved to ${ENV_FILE} (permissions: 600)"
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo ">> Installing dependencies…"

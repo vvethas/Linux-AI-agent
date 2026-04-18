@@ -1,5 +1,6 @@
 import json
 import smtplib
+import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any, Dict, Optional
@@ -95,8 +96,9 @@ class Notifier:
             port = int(cfg.get("smtp_port", 587))
             use_tls = bool(cfg.get("smtp_tls", True))
             if use_tls:
+                context = ssl.create_default_context()
                 server = smtplib.SMTP(str(cfg["smtp_host"]), port, timeout=20)
-                server.starttls()
+                server.starttls(context=context)
             else:
                 server = smtplib.SMTP_SSL(str(cfg["smtp_host"]), port, timeout=20)
             if cfg.get("smtp_user"):
