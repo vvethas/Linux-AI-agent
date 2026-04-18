@@ -7,12 +7,12 @@ if ! command -v python3 &>/dev/null; then
   exit 1
 fi
 
-# ── Anthropic API key ─────────────────────────────────────────────────────────
-if [ -z "$ANTHROPIC_API_KEY" ]; then
-  read -rsp "Enter your ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY
+# ── OpenAI API key ────────────────────────────────────────────────────────────
+if [ -z "$OPENAI_API_KEY" ]; then
+  read -rsp "Enter your OPENAI_API_KEY: " OPENAI_API_KEY
   echo
-  export ANTHROPIC_API_KEY
-  echo "export ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY\"" >> ~/.bashrc
+  export OPENAI_API_KEY
+  echo "export OPENAI_API_KEY=\"$OPENAI_API_KEY\"" >> ~/.bashrc
   echo "API key saved to ~/.bashrc"
 fi
 

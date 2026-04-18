@@ -2,4 +2,4 @@ flask>=3.0
 requests>=2.31
 paramiko>=3.4
 apscheduler>=3.10
-anthropic>=0.25
+openai>=1.0

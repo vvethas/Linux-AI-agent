@@ -1,33 +1,31 @@
 """
-core.py — Claude API calls for troubleshoot and build modes.
+core.py — OpenAI API calls for troubleshoot and build modes.
 
-All Claude calls use POST https://api.anthropic.com/v1/messages
-and strip ```json fences before parsing.
+All calls use the openai Python library (chat completions) and
+strip ```json fences before parsing.
 """
 import json
 import logging
 import os
 import re
 
-import requests
+from openai import OpenAI
 
 log = logging.getLogger(__name__)
 
-ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "gpt-4o"
 MAX_TOKENS = 4000
-ANTHROPIC_VERSION = "2023-06-01"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Low-level helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _api_key() -> str:
-    key = os.environ.get("ANTHROPIC_API_KEY", "")
+def _client() -> OpenAI:
+    key = os.environ.get("OPENAI_API_KEY", "")
     if not key:
-        raise RuntimeError("ANTHROPIC_API_KEY environment variable is not set")
-    return key
+        raise RuntimeError("OPENAI_API_KEY environment variable is not set")
+    return OpenAI(api_key=key)
 
 
 def _strip_fences(text: str) -> str:
@@ -39,26 +37,19 @@ def _strip_fences(text: str) -> str:
 
 
 def _call(system: str, messages: list) -> str:
-    """Raw Claude API call. Returns the assistant's text content."""
-    headers = {
-        "x-api-key": _api_key(),
-        "anthropic-version": ANTHROPIC_VERSION,
-        "content-type": "application/json",
-    }
-    body = {
-        "model": MODEL,
-        "max_tokens": MAX_TOKENS,
-        "system": system,
-        "messages": messages,
-    }
-    resp = requests.post(ANTHROPIC_API_URL, headers=headers, json=body, timeout=120)
-    resp.raise_for_status()
-    data = resp.json()
-    return data["content"][0]["text"]
+    """Raw OpenAI chat completion call. Returns the assistant's text content."""
+    openai_messages = [{"role": "system", "content": system}] + messages
+    response = _client().chat.completions.create(
+        model=MODEL,
+        max_tokens=MAX_TOKENS,
+        messages=openai_messages,
+        timeout=120,
+    )
+    return response.choices[0].message.content
 
 
 def _call_json(system: str, messages: list) -> dict:
-    """Claude API call that parses the response as JSON."""
+    """OpenAI API call that parses the response as JSON."""
     raw = _call(system, messages)
     clean = _strip_fences(raw)
     return json.loads(clean)
@@ -110,7 +101,7 @@ Analyze the provided diagnostics and return ONLY valid JSON (no markdown fences)
 
 def generate_fix_plan(diagnostics: dict, user_issue: str, history: list) -> dict:
     """
-    Send diagnostics + issue description to Claude.
+    Send diagnostics + issue description to OpenAI.
     Returns parsed JSON plan.
     history is the conversation messages list (mutated in place for multi-turn).
     """
