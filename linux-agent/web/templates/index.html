@@ -1,0 +1,1194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Linux AI Infrastructure Agent</title>
+<style>
+/* ── reset & base ─────────────────────────────────────────────────────────── */
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d0d0d;--surface:#141414;--surface2:#1c1c1c;
+  --accent:#4ec9b0;--magenta:#b87fd4;--green:#4caf50;--red:#e05252;
+  --yellow:#e5b840;--blue:#5b9bd5;--muted:#888;--border:#222;
+  --text:#e0e0e0;--text2:#ccc;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);
+  font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;font-size:14px}
+a{color:var(--accent);text-decoration:none}
+button{cursor:pointer;border:none;outline:none;border-radius:4px}
+input,select,textarea{background:var(--surface2);border:1px solid var(--border);
+  color:var(--text);border-radius:4px;padding:6px 10px;font-size:13px;width:100%}
+input:focus,select:focus,textarea:focus{outline:1px solid var(--accent)}
+label{display:block;margin-bottom:3px;color:var(--muted);font-size:12px}
+pre,code{font-family:ui-monospace,SFMono-Regular,monospace}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:#333;border-radius:3px}
+
+/* ── layout ──────────────────────────────────────────────────────────────── */
+#app{display:flex;flex-direction:column;height:100vh}
+#header{background:var(--surface);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;padding:0 1rem;gap:1rem;flex-shrink:0}
+#header h1{color:var(--accent);font-size:1rem;white-space:nowrap;margin-right:0.5rem}
+.nav-tabs{display:flex;gap:0;flex:1}
+.nav-tab{padding:14px 18px;color:var(--muted);background:none;border:none;
+  border-bottom:2px solid transparent;font-size:13px;cursor:pointer;white-space:nowrap;
+  transition:color .15s}
+.nav-tab:hover{color:var(--text)}
+.nav-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+#body{display:flex;flex:1;overflow:hidden}
+
+/* ── sidebar ─────────────────────────────────────────────────────────────── */
+#sidebar{width:220px;background:var(--surface);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;flex-shrink:0;overflow:hidden}
+#sidebar-header{padding:10px 12px;display:flex;align-items:center;justify-content:space-between;
+  border-bottom:1px solid var(--border)}
+#sidebar-header span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+#btn-add-instance{background:var(--accent);color:#000;padding:3px 10px;font-size:12px;
+  border-radius:3px;font-weight:600}
+#instance-list{overflow-y:auto;flex:1}
+.inst-item{padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;
+  display:flex;align-items:center;gap:6px;transition:background .1s}
+.inst-item:hover,.inst-item.selected{background:var(--surface2)}
+.status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.dot-online{background:var(--green)}
+.dot-offline{background:var(--red)}
+.dot-auth_error{background:var(--yellow)}
+.dot-unknown{background:var(--muted)}
+.inst-name{font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inst-actions{display:flex;gap:4px;flex-shrink:0}
+.inst-action-btn{background:none;color:var(--muted);font-size:14px;padding:2px 4px;
+  border-radius:2px;line-height:1}
+.inst-action-btn:hover{color:var(--accent);background:var(--surface2)}
+
+/* ── main content ─────────────────────────────────────────────────────────── */
+#main{flex:1;overflow:auto;padding:1.25rem}
+
+/* ── tab panes ───────────────────────────────────────────────────────────── */
+.tab-pane{display:none}
+.tab-pane.active{display:block}
+
+/* ── dashboard ───────────────────────────────────────────────────────────── */
+.stat-cards{display:flex;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;
+  padding:1rem 1.5rem;min-width:130px;text-align:center}
+.stat-val{font-size:2rem;font-weight:700}
+.stat-label{font-size:11px;color:var(--muted);margin-top:2px}
+.inst-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem;
+  margin-bottom:1.5rem}
+.inst-tile{background:var(--surface);border:1px solid var(--border);border-radius:6px;
+  padding:1rem;display:flex;flex-direction:column;gap:0.5rem}
+.tile-top{display:flex;align-items:center;gap:0.75rem}
+.score-ring{width:48px;height:48px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-size:1rem;font-weight:700;flex-shrink:0;border:3px solid var(--border)}
+.tile-info{flex:1;min-width:0}
+.tile-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile-role{font-size:11px;color:var(--muted)}
+.tile-btns{display:flex;gap:6px;flex-wrap:wrap}
+.tile-btn{font-size:11px;padding:4px 10px;border-radius:3px;background:var(--surface2);
+  color:var(--text2);border:1px solid var(--border)}
+.tile-btn:hover{background:var(--accent);color:#000;border-color:var(--accent)}
+.activity-feed{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:1rem}
+.activity-feed h3{color:var(--accent);margin-bottom:0.75rem;font-size:13px}
+.activity-item{display:flex;gap:0.75rem;padding:6px 0;border-bottom:1px solid var(--border);
+  font-size:12px;align-items:center}
+.activity-item:last-child{border-bottom:none}
+.badge{padding:2px 8px;border-radius:3px;font-size:11px;font-weight:700}
+.badge-done{background:#1b3a1b;color:var(--green)}
+.badge-failed{background:#3a1b1b;color:var(--red)}
+.badge-running{background:#1b2e3a;color:var(--blue)}
+.badge-pending{background:#2a2a1b;color:var(--yellow)}
+
+/* ── chat ─────────────────────────────────────────────────────────────────── */
+#chat-container{display:flex;flex-direction:column;height:calc(100vh - 160px)}
+#chat-messages{flex:1;overflow-y:auto;padding:0.5rem 0;display:flex;flex-direction:column;gap:0.75rem}
+.msg{max-width:90%;padding:10px 14px;border-radius:6px;line-height:1.5;font-size:13px}
+.msg-user{background:var(--surface2);align-self:flex-end;color:var(--text)}
+.msg-ai{background:#0f1f1a;border:1px solid #1a3a30;align-self:flex-start;color:var(--text2)}
+.msg-system{background:var(--surface);border:1px solid var(--border);align-self:center;
+  color:var(--muted);font-size:12px}
+.msg-pre{background:#0d0d0d;border:1px solid var(--border);border-radius:4px;
+  padding:8px;margin-top:6px;overflow-x:auto;font-size:12px;white-space:pre-wrap;
+  color:var(--accent)}
+#chat-input-row{display:flex;gap:8px;margin-top:0.75rem}
+#chat-input{flex:1;resize:none;height:60px;font-family:inherit}
+#chat-send{background:var(--accent);color:#000;padding:0 20px;font-weight:700;border-radius:4px}
+.plan-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;
+  padding:1rem;margin-top:0.5rem}
+.plan-card h4{color:var(--accent);margin-bottom:0.5rem}
+.step-row{display:flex;align-items:center;gap:8px;padding:6px 0;
+  border-bottom:1px solid var(--border)}
+.step-row:last-child{border-bottom:none}
+.step-title{flex:1;font-size:13px}
+.risky-badge{background:#3a1b1b;color:var(--red);padding:1px 6px;border-radius:3px;
+  font-size:11px}
+.step-exec-btn{background:var(--accent);color:#000;padding:4px 14px;font-size:12px;
+  font-weight:600;border-radius:3px}
+.step-exec-btn:disabled{background:var(--border);color:var(--muted);cursor:not-allowed}
+.step-output{background:#0d0d0d;border:1px solid var(--border);border-radius:4px;
+  padding:8px;margin-top:4px;font-size:12px;white-space:pre-wrap;color:var(--text2);
+  max-height:200px;overflow-y:auto}
+.phase-header{color:var(--magenta);font-weight:700;margin:0.75rem 0 0.25rem;font-size:13px}
+.approve-btn{background:var(--green);color:#000;padding:6px 18px;font-weight:700;
+  border-radius:4px;margin-top:0.5rem}
+.verify-btn{background:var(--blue);color:#fff;padding:6px 18px;font-weight:700;
+  border-radius:4px;margin-top:0.5rem}
+
+/* ── jobs ─────────────────────────────────────────────────────────────────── */
+.filter-row{display:flex;gap:0.75rem;margin-bottom:1rem;align-items:flex-end;flex-wrap:wrap}
+.filter-row label{color:var(--muted);font-size:12px;margin-bottom:2px}
+.filter-row select,.filter-row input{width:160px}
+.jobs-table-wrap{overflow-x:auto}
+table.data-table{width:100%;border-collapse:collapse;font-size:13px}
+table.data-table th{background:var(--surface2);color:var(--muted);text-align:left;
+  padding:8px 10px;border-bottom:2px solid var(--border);white-space:nowrap}
+table.data-table td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+table.data-table tr:hover td{background:var(--surface)}
+.job-link{color:var(--accent);cursor:pointer}
+.job-link:hover{text-decoration:underline}
+
+/* ── side panel ───────────────────────────────────────────────────────────── */
+#side-panel{position:fixed;right:0;top:0;bottom:0;width:580px;background:var(--surface);
+  border-left:1px solid var(--border);transform:translateX(100%);
+  transition:transform .25s ease;z-index:1000;display:flex;flex-direction:column}
+#side-panel.open{transform:translateX(0)}
+#panel-header{padding:1rem;border-bottom:1px solid var(--border);display:flex;
+  align-items:center;justify-content:space-between}
+#panel-title{font-weight:600;color:var(--accent)}
+#panel-close{background:none;color:var(--muted);font-size:18px;padding:0 4px}
+#panel-close:hover{color:var(--text)}
+#panel-body{flex:1;overflow-y:auto;padding:1rem}
+.step-detail{background:var(--surface2);border-radius:4px;padding:0.75rem;margin-bottom:0.75rem}
+.step-detail-title{font-weight:600;margin-bottom:4px;font-size:13px}
+.step-detail-cmds{font-family:monospace;font-size:11px;color:var(--accent);
+  background:#0d0d0d;padding:4px 8px;border-radius:3px;margin-bottom:6px;white-space:pre-wrap}
+.step-detail-output{font-family:monospace;font-size:11px;color:var(--text2);
+  background:#0d0d0d;padding:6px 8px;border-radius:3px;white-space:pre-wrap;
+  max-height:300px;overflow-y:auto}
+
+/* ── study reports ───────────────────────────────────────────────────────── */
+.study-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;
+  padding:1rem;margin-bottom:0.75rem;display:flex;align-items:center;gap:1rem}
+.study-info{flex:1}
+.study-actions{display:flex;gap:8px}
+.btn-sm{padding:4px 12px;font-size:12px;border-radius:3px;background:var(--surface2);
+  color:var(--text2);border:1px solid var(--border)}
+.btn-sm:hover{background:var(--accent);color:#000;border-color:var(--accent)}
+.btn-danger{background:#3a1b1b;color:var(--red);border-color:#5a2b2b}
+.btn-danger:hover{background:var(--red);color:#fff}
+
+/* ── alerts & schedule ───────────────────────────────────────────────────── */
+.settings-section{background:var(--surface);border:1px solid var(--border);
+  border-radius:6px;padding:1.25rem;margin-bottom:1rem}
+.settings-section h3{color:var(--accent);margin-bottom:1rem;font-size:14px}
+.form-row{display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:0.75rem}
+.form-field{flex:1;min-width:180px}
+.toggle-row{display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem}
+.toggle-row label{color:var(--text2);margin:0;font-size:13px;cursor:pointer}
+input[type=checkbox]{width:auto;cursor:pointer}
+.btn-primary{background:var(--accent);color:#000;padding:7px 20px;font-weight:700;
+  border-radius:4px}
+.btn-primary:hover{background:#3ab89a}
+
+/* ── modal ────────────────────────────────────────────────────────────────── */
+#modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;
+  align-items:center;justify-content:center}
+#modal-overlay.open{display:flex}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:1.5rem;width:460px;max-width:95vw;max-height:90vh;overflow-y:auto}
+.modal h2{color:var(--accent);margin-bottom:1.25rem;font-size:1rem}
+.modal-footer{display:flex;justify-content:flex-end;gap:0.75rem;margin-top:1.25rem}
+.btn-cancel{background:var(--surface2);color:var(--text2);padding:7px 18px;border-radius:4px}
+.form-field-full{margin-bottom:0.75rem}
+.inline-msg{font-size:12px;margin-top:4px;padding:4px 8px;border-radius:3px}
+.inline-ok{background:#1b3a1b;color:var(--green)}
+.inline-err{background:#3a1b1b;color:var(--red)}
+
+/* ── misc ─────────────────────────────────────────────────────────────────── */
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);
+  border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;
+  vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+.risk-badge{background:#3a1b1b;color:var(--red);padding:1px 6px;border-radius:3px;font-size:11px}
+.section-title{font-size:16px;font-weight:700;margin-bottom:1rem;color:var(--text)}
+h2.section-title{color:var(--accent)}
+.empty-msg{color:var(--muted);font-size:13px;padding:1rem 0}
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- ── Header ───────────────────────────────────────────────────────────── -->
+<div id="header">
+  <h1>⚡ Linux AI Agent</h1>
+  <div class="nav-tabs">
+    <button class="nav-tab active" data-tab="dashboard">Dashboard</button>
+    <button class="nav-tab" data-tab="chat">Chat</button>
+    <button class="nav-tab" data-tab="jobs">Job History</button>
+    <button class="nav-tab" data-tab="studies">Study Reports</button>
+    <button class="nav-tab" data-tab="alerts">Alerts &amp; Schedule</button>
+  </div>
+</div>
+
+<div id="body">
+
+<!-- ── Sidebar ──────────────────────────────────────────────────────────── -->
+<div id="sidebar">
+  <div id="sidebar-header">
+    <span>Instances</span>
+    <button id="btn-add-instance">+ Add</button>
+  </div>
+  <div id="instance-list"></div>
+</div>
+
+<!-- ── Main ─────────────────────────────────────────────────────────────── -->
+<div id="main">
+
+  <!-- Dashboard tab -->
+  <div id="tab-dashboard" class="tab-pane active">
+    <div class="stat-cards" id="stat-cards">
+      <div class="stat-card"><div class="stat-val" id="stat-total">—</div><div class="stat-label">Total Instances</div></div>
+      <div class="stat-card"><div class="stat-val" style="color:var(--green)" id="stat-online">—</div><div class="stat-label">Online</div></div>
+      <div class="stat-card"><div class="stat-val" style="color:var(--red)" id="stat-offline">—</div><div class="stat-label">Offline</div></div>
+      <div class="stat-card"><div class="stat-val" style="color:var(--accent)" id="stat-avg">—</div><div class="stat-label">Avg Health</div></div>
+    </div>
+    <div class="inst-grid" id="inst-grid"></div>
+    <div class="activity-feed">
+      <h3>Recent Activity</h3>
+      <div id="activity-list"></div>
+    </div>
+  </div>
+
+  <!-- Chat tab -->
+  <div id="tab-chat" class="tab-pane">
+    <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem">
+      <span style="font-size:13px;color:var(--muted)">Instance:</span>
+      <select id="chat-instance-select" style="width:200px"></select>
+    </div>
+    <div id="chat-container">
+      <div id="chat-messages"></div>
+      <div id="chat-input-row">
+        <textarea id="chat-input" placeholder="Describe your issue or deployment goal…"></textarea>
+        <button id="chat-send">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Jobs tab -->
+  <div id="tab-jobs" class="tab-pane">
+    <h2 class="section-title">Job History</h2>
+    <div class="filter-row">
+      <div><label>Instance</label><select id="job-filter-instance"><option value="">All</option></select></div>
+      <div><label>Type</label>
+        <select id="job-filter-type">
+          <option value="">All</option>
+          <option value="troubleshoot">Troubleshoot</option>
+          <option value="build">Build</option>
+          <option value="study">Study</option>
+          <option value="replicate">Replicate</option>
+        </select>
+      </div>
+      <button class="btn-sm" onclick="loadJobs()">Refresh</button>
+    </div>
+    <div class="jobs-table-wrap">
+      <table class="data-table">
+        <thead><tr>
+          <th>#</th><th>Instance</th><th>Type</th><th>Title</th>
+          <th>Status</th><th>Started</th><th>Duration</th><th></th>
+        </tr></thead>
+        <tbody id="jobs-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Studies tab -->
+  <div id="tab-studies" class="tab-pane">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <h2 class="section-title" style="margin:0">Study Reports</h2>
+      <select id="study-filter-instance" style="width:200px">
+        <option value="">All Instances</option>
+      </select>
+    </div>
+    <div id="studies-list"></div>
+  </div>
+
+  <!-- Alerts & Schedule tab -->
+  <div id="tab-alerts" class="tab-pane">
+    <div style="display:flex;gap:1.5rem;flex-wrap:wrap">
+
+      <!-- Notification settings -->
+      <div style="flex:1;min-width:320px">
+        <div class="settings-section">
+          <h3>Slack Notifications</h3>
+          <div class="form-field-full">
+            <label>Webhook URL</label>
+            <input type="text" id="cfg-slack-webhook" placeholder="https://hooks.slack.com/…"/>
+          </div>
+          <div class="toggle-row"><input type="checkbox" id="cfg-enabled"><label for="cfg-enabled">Notifications enabled</label></div>
+          <div class="toggle-row"><input type="checkbox" id="cfg-notify-jobs"><label for="cfg-notify-jobs">Notify on all jobs</label></div>
+          <div class="toggle-row"><input type="checkbox" id="cfg-notify-studies"><label for="cfg-notify-studies">Notify on all studies</label></div>
+          <div class="toggle-row"><input type="checkbox" id="cfg-notify-unreachable"><label for="cfg-notify-unreachable">Notify when instance unreachable</label></div>
+          <div class="toggle-row"><input type="checkbox" id="cfg-alert-failed-svcs"><label for="cfg-alert-failed-svcs">Alert on failed services</label></div>
+          <div class="form-field-full" style="margin-top:0.5rem">
+            <label>Alert when health score below</label>
+            <input type="number" id="cfg-score-below" value="70" min="0" max="100" style="width:80px"/>
+          </div>
+        </div>
+        <div class="settings-section">
+          <h3>Email (SMTP)</h3>
+          <div class="form-row">
+            <div class="form-field"><label>SMTP Host</label><input type="text" id="cfg-smtp-host"/></div>
+            <div class="form-field"><label>Port</label><input type="number" id="cfg-smtp-port" value="587" style="width:80px"/></div>
+          </div>
+          <div class="form-row">
+            <div class="form-field"><label>Username</label><input type="text" id="cfg-smtp-user"/></div>
+            <div class="form-field"><label>Password</label><input type="password" id="cfg-smtp-pass"/></div>
+          </div>
+          <div class="form-row">
+            <div class="form-field"><label>From</label><input type="email" id="cfg-email-from"/></div>
+            <div class="form-field"><label>To</label><input type="email" id="cfg-email-to"/></div>
+          </div>
+          <div class="toggle-row"><input type="checkbox" id="cfg-smtp-tls" checked><label for="cfg-smtp-tls">Use STARTTLS</label></div>
+          <div style="display:flex;gap:0.75rem;margin-top:0.75rem">
+            <button class="btn-primary" onclick="saveNotifyConfig()">Save</button>
+            <button class="btn-sm" onclick="testNotify()">Test</button>
+          </div>
+          <div id="notify-msg" style="margin-top:6px"></div>
+        </div>
+      </div>
+
+      <!-- Per-instance schedules -->
+      <div style="flex:1;min-width:320px">
+        <div class="settings-section">
+          <h3>Scheduled Health Checks</h3>
+          <div class="form-field-full" style="margin-bottom:0.75rem">
+            <label>Instance</label>
+            <select id="sched-instance-select" style="width:100%"></select>
+          </div>
+          <div class="toggle-row"><input type="checkbox" id="sched-enabled"><label for="sched-enabled">Enabled</label></div>
+          <div class="form-field-full" style="margin-top:0.5rem">
+            <label>Mode</label>
+            <select id="sched-mode">
+              <option value="interval">Every N hours</option>
+              <option value="cron">Cron expression</option>
+            </select>
+          </div>
+          <div class="form-field-full" style="margin-top:0.5rem" id="sched-interval-row">
+            <label>Interval (hours)</label>
+            <input type="number" id="sched-hours" value="6" min="0.5" step="0.5" style="width:100px"/>
+          </div>
+          <div class="form-field-full" style="margin-top:0.5rem;display:none" id="sched-cron-row">
+            <label>Cron expression</label>
+            <input type="text" id="sched-cron" placeholder="0 */6 * * *"/>
+          </div>
+          <div style="display:flex;gap:0.75rem;margin-top:0.75rem">
+            <button class="btn-primary" onclick="saveSchedule()">Save Schedule</button>
+            <button class="btn-sm" onclick="deleteSchedule()">Remove</button>
+          </div>
+          <div id="sched-msg" style="margin-top:6px"></div>
+        </div>
+        <div class="settings-section">
+          <h3>Active Scheduler Jobs</h3>
+          <div id="scheduler-jobs-list" style="font-size:12px;color:var(--muted)"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /main -->
+</div><!-- /body -->
+</div><!-- /app -->
+
+<!-- ── Side panel ────────────────────────────────────────────────────────── -->
+<div id="side-panel">
+  <div id="panel-header">
+    <span id="panel-title">Job Details</span>
+    <button id="panel-close" onclick="closePanel()">✕</button>
+  </div>
+  <div id="panel-body"></div>
+</div>
+
+<!-- ── Add Instance Modal ─────────────────────────────────────────────────── -->
+<div id="modal-overlay">
+  <div class="modal">
+    <h2>Add Instance</h2>
+    <div class="form-field-full"><label>Label</label><input id="m-label" placeholder="e.g. prod-openstack-01"/></div>
+    <div class="form-row">
+      <div class="form-field"><label>Host / IP</label><input id="m-host" placeholder="192.168.1.100"/></div>
+      <div class="form-field"><label>Port</label><input id="m-port" value="22" type="number" style="width:80px"/></div>
+    </div>
+    <div class="form-field-full"><label>Username</label><input id="m-user" placeholder="root"/></div>
+    <div class="form-field-full">
+      <label>Auth Type</label>
+      <select id="m-auth">
+        <option value="key">SSH Key</option>
+        <option value="password">Password</option>
+      </select>
+    </div>
+    <div class="form-field-full" id="m-key-row"><label>Key Path</label><input id="m-key" placeholder="~/.ssh/id_rsa"/></div>
+    <div class="form-field-full" id="m-pass-row" style="display:none"><label>Password</label><input type="password" id="m-pass"/></div>
+    <div class="form-field-full"><label>Tags (comma-separated)</label><input id="m-tags" placeholder="prod, openstack"/></div>
+    <div id="m-test-msg" style="margin-top:6px"></div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn-sm" onclick="testInstanceModal()">Test SSH</button>
+      <button class="btn-primary" onclick="addInstance()">Add Instance</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ──────────────────────────────────────────────────────────────────────────────
+// State
+// ──────────────────────────────────────────────────────────────────────────────
+let instances = [];
+let selectedInstanceId = null;
+let activeTab = 'dashboard';
+let chatJobId = null;
+let chatPlan = null;
+let chatMode = null; // 'troubleshoot'|'build'
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Utils
+// ──────────────────────────────────────────────────────────────────────────────
+const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const api = (url, opts={}) => fetch(url, {
+  headers:{'Content-Type':'application/json',...(opts.headers||{})},
+  ...opts
+}).then(r=>r.json());
+
+function scoreColor(s){
+  if(s==null)return'var(--muted)';
+  if(s>=80)return'var(--green)';
+  if(s>=60)return'var(--yellow)';
+  return'var(--red)';
+}
+
+function statusDotClass(st){
+  return'dot-'+(st||'unknown');
+}
+
+function badgeClass(status){
+  const m={done:'badge-done',failed:'badge-failed',running:'badge-running',pending:'badge-pending'};
+  return'badge '+(m[status]||'badge-pending');
+}
+
+function fmtDate(s){
+  if(!s)return'—';
+  return new Date(s.replace(' ','T')+'Z').toLocaleString();
+}
+
+function fmtDur(sec){
+  if(sec==null)return'—';
+  if(sec<60)return sec.toFixed(0)+'s';
+  return(sec/60).toFixed(1)+'m';
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Tabs
+// ──────────────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.nav-tab').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    activeTab = btn.dataset.tab;
+    document.querySelectorAll('.nav-tab').forEach(b=>b.classList.toggle('active',b===btn));
+    document.querySelectorAll('.tab-pane').forEach(p=>{
+      p.classList.toggle('active', p.id==='tab-'+activeTab);
+    });
+    if(activeTab==='dashboard')loadDashboard();
+    else if(activeTab==='jobs')loadJobs();
+    else if(activeTab==='studies')loadStudies();
+    else if(activeTab==='alerts'){loadNotifyConfig();loadSchedulerJobs();}
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Instances — sidebar
+// ──────────────────────────────────────────────────────────────────────────────
+async function loadInstances(){
+  const res = await api('/api/instances');
+  instances = res.data||[];
+  renderSidebar();
+  populateInstanceSelects();
+}
+
+function renderSidebar(){
+  const el = document.getElementById('instance-list');
+  if(!instances.length){
+    el.innerHTML='<div style="padding:12px;color:var(--muted);font-size:12px">No instances added</div>';
+    return;
+  }
+  el.innerHTML = instances.map(i=>`
+    <div class="inst-item${selectedInstanceId===i.id?' selected':''}" data-id="${i.id}" onclick="selectInstance(${i.id})">
+      <div class="status-dot ${statusDotClass(i.last_status)}"></div>
+      <div class="inst-name">${esc(i.label)}</div>
+      <div class="inst-actions">
+        <button class="inst-action-btn" title="Study" onclick="event.stopPropagation();studyInstance(${i.id})">⊕</button>
+        <button class="inst-action-btn" title="Schedule" onclick="event.stopPropagation();openScheduleFor(${i.id})">⏱</button>
+      </div>
+    </div>`).join('');
+}
+
+function populateInstanceSelects(){
+  ['chat-instance-select','job-filter-instance','study-filter-instance','sched-instance-select'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(!el)return;
+    const hasAll = id==='job-filter-instance'||id==='study-filter-instance';
+    const prev = el.value;
+    el.innerHTML = (hasAll?'<option value="">All</option>':'')+
+      instances.map(i=>`<option value="${i.id}">${esc(i.label)} (${esc(i.host)})</option>`).join('');
+    if(prev) el.value=prev;
+  });
+}
+
+function selectInstance(id){
+  selectedInstanceId = id;
+  renderSidebar();
+}
+
+async function studyInstance(id){
+  selectInstance(id);
+  showTab('studies');
+  const inst = instances.find(i=>i.id===id);
+  appendMsg('system',`Starting deep study of ${inst?.label||id}…`);
+  await api(`/api/instances/${id}/study`,{method:'POST'});
+  appendMsg('system','Study started in background — check Study Reports when complete.');
+}
+
+function openScheduleFor(id){
+  selectInstance(id);
+  showTab('alerts');
+  document.getElementById('sched-instance-select').value=id;
+  loadScheduleFor(id);
+}
+
+function showTab(name){
+  document.querySelectorAll('.nav-tab').forEach(b=>{
+    b.classList.toggle('active', b.dataset.tab===name);
+  });
+  document.querySelectorAll('.tab-pane').forEach(p=>{
+    p.classList.toggle('active', p.id==='tab-'+name);
+  });
+  activeTab=name;
+}
+
+// Modal
+document.getElementById('btn-add-instance').onclick=()=>{
+  document.getElementById('modal-overlay').classList.add('open');
+};
+document.getElementById('m-auth').onchange=function(){
+  document.getElementById('m-key-row').style.display=this.value==='key'?'':'none';
+  document.getElementById('m-pass-row').style.display=this.value==='password'?'':'none';
+};
+function closeModal(){
+  document.getElementById('modal-overlay').classList.remove('open');
+  document.getElementById('m-test-msg').innerHTML='';
+}
+
+async function testInstanceModal(){
+  const data = modalFormData();
+  const res = await api('/api/instances',{method:'POST',body:JSON.stringify({...data,label:'__test__'})});
+  if(!res.ok){setMsg('m-test-msg',res.error,false);return;}
+  const id = res.data.id;
+  const res2 = await api(`/api/instances/${id}/test`,{method:'POST'});
+  await api(`/api/instances/${id}`,{method:'DELETE'});
+  if(res2.data?.ok){setMsg('m-test-msg',`Connected (${res2.data.latency_ms}ms)`,true);}
+  else{setMsg('m-test-msg','SSH failed: '+(res2.data?.error||'unknown'),false);}
+}
+
+function modalFormData(){
+  const tags = document.getElementById('m-tags').value.split(',').map(s=>s.trim()).filter(Boolean);
+  return{
+    label:document.getElementById('m-label').value.trim(),
+    host:document.getElementById('m-host').value.trim(),
+    port:parseInt(document.getElementById('m-port').value)||22,
+    username:document.getElementById('m-user').value.trim(),
+    auth_type:document.getElementById('m-auth').value,
+    key_path:document.getElementById('m-key').value.trim()||null,
+    password:document.getElementById('m-pass').value||null,
+    tags,
+  };
+}
+
+async function addInstance(){
+  const data = modalFormData();
+  if(!data.label||!data.host||!data.username){setMsg('m-test-msg','Label, host, and username required',false);return;}
+  const res = await api('/api/instances',{method:'POST',body:JSON.stringify(data)});
+  if(!res.ok){setMsg('m-test-msg',res.error,false);return;}
+  closeModal();
+  await loadInstances();
+  loadDashboard();
+}
+
+function setMsg(id, text, ok){
+  document.getElementById(id).innerHTML=`<div class="inline-msg ${ok?'inline-ok':'inline-err'}">${esc(text)}</div>`;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Dashboard
+// ──────────────────────────────────────────────────────────────────────────────
+async function loadDashboard(){
+  const res = await api('/api/dashboard');
+  const d = res.data||{};
+  document.getElementById('stat-total').textContent=d.total_instances??'—';
+  document.getElementById('stat-online').textContent=d.online??'—';
+  document.getElementById('stat-offline').textContent=d.offline??'—';
+  const inst = d.instances||[];
+  const scores = inst.map(i=>i.health_score).filter(s=>s!=null);
+  const avg = scores.length ? Math.round(scores.reduce((a,b)=>a+b,0)/scores.length) : null;
+  document.getElementById('stat-avg').textContent = avg??'—';
+
+  // Instance grid
+  const grid = document.getElementById('inst-grid');
+  if(!inst.length){grid.innerHTML='<p class="empty-msg">No instances yet.</p>';return;}
+  grid.innerHTML = inst.map(i=>{
+    const sc = i.health_score;
+    const col = scoreColor(sc);
+    return`<div class="inst-tile">
+      <div class="tile-top">
+        <div class="score-ring" style="border-color:${col};color:${col}">${sc??'?'}</div>
+        <div class="tile-info">
+          <div class="tile-name">${esc(i.label)}</div>
+          <div class="tile-role">${esc(i.role||'Unknown role')}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">
+            <span class="status-dot ${statusDotClass(i.last_status)}" style="display:inline-block;margin-right:4px"></span>
+            ${esc(i.last_status||'unknown')}
+            ${i.last_seen?'· '+fmtDate(i.last_seen):''}
+          </div>
+        </div>
+      </div>
+      <div class="tile-btns">
+        <button class="tile-btn" onclick="openChatFor(${i.id})">Chat</button>
+        <button class="tile-btn" onclick="studyInstance(${i.id})">Study</button>
+        <button class="tile-btn" onclick="openReplicateFor(${i.id})">Replicate</button>
+        <button class="tile-btn" onclick="viewLatestReport(${i.id})">Report</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Activity
+  const al = document.getElementById('activity-list');
+  const jobs = d.recent_jobs||[];
+  al.innerHTML = jobs.length ? jobs.map(j=>`
+    <div class="activity-item">
+      <span class="${badgeClass(j.status)}">${esc(j.status)}</span>
+      <span style="color:var(--accent)">${esc(j.instance_label||'')}</span>
+      <span>${esc(j.title)}</span>
+      <span style="color:var(--muted);margin-left:auto;font-size:11px">${fmtDate(j.started_at)}</span>
+    </div>`).join('') : '<div class="empty-msg">No recent activity.</div>';
+}
+
+function openChatFor(id){
+  selectInstance(id);
+  showTab('chat');
+  document.getElementById('chat-instance-select').value=id;
+}
+
+async function viewLatestReport(id){
+  const res = await api('/api/studies?instance_id='+id);
+  const studies = res.data||[];
+  if(!studies.length){alert('No study reports for this instance.');return;}
+  window.open('/api/studies/'+studies[0].id+'/html','_blank');
+}
+
+async function openReplicateFor(sourceId){
+  const target = prompt('Enter target instance ID to replicate onto:');
+  if(!target)return;
+  showTab('chat');
+  selectInstance(parseInt(target));
+  document.getElementById('chat-instance-select').value=target;
+  // trigger replicate via chat
+  const fakeMsg = `Replicate instance ${sourceId} onto this instance`;
+  document.getElementById('chat-input').value=fakeMsg;
+  await sendChat(true, sourceId, parseInt(target));
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Chat
+// ──────────────────────────────────────────────────────────────────────────────
+document.getElementById('chat-send').onclick = ()=>sendChat();
+document.getElementById('chat-input').addEventListener('keydown', e=>{
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat();}
+});
+
+function appendMsg(type, html, preText=null){
+  const el = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className=`msg msg-${type}`;
+  div.innerHTML=html;
+  if(preText){
+    const pre=document.createElement('pre');
+    pre.className='msg-pre';
+    pre.textContent=preText;
+    div.appendChild(pre);
+  }
+  el.appendChild(div);
+  el.scrollTop=el.scrollHeight;
+}
+
+async function sendChat(isReplicate=false, srcId=null, tgtId=null){
+  const instSel = document.getElementById('chat-instance-select');
+  const iid = parseInt(isReplicate ? tgtId : instSel.value);
+  if(!iid){appendMsg('system','Please select an instance.');return;}
+
+  const inp = document.getElementById('chat-input');
+  const msg = inp.value.trim();
+  if(!msg)return;
+  inp.value='';
+  appendMsg('user', esc(msg));
+
+  // Reset state for new conversation
+  chatJobId=null; chatPlan=null; chatMode=null;
+
+  appendMsg('system','<span class="spinner"></span> Classifying intent…');
+
+  if(isReplicate){
+    // Direct replicate flow
+    await startReplicate(srcId, iid, msg);
+    return;
+  }
+
+  // Classify
+  const cls = await api('/api/classify',{method:'POST',body:JSON.stringify({message:msg})});
+  chatMode = cls.data?.intent||'troubleshoot';
+  // Remove spinner msg
+  const msgs = document.getElementById('chat-messages');
+  msgs.removeChild(msgs.lastChild);
+
+  appendMsg('system',`Intent: <strong style="color:var(--accent)">${chatMode}</strong>`);
+
+  if(chatMode==='troubleshoot'){
+    await startTroubleshoot(iid, msg);
+  } else {
+    await startBuild(iid, msg);
+  }
+}
+
+async function startTroubleshoot(iid, msg){
+  appendMsg('system','<span class="spinner"></span> Collecting diagnostics…');
+  const res = await api('/api/diagnose',{method:'POST',body:JSON.stringify({instance_id:iid,message:msg})});
+  const msgs = document.getElementById('chat-messages');
+  msgs.removeChild(msgs.lastChild);
+
+  if(!res.ok){appendMsg('system','Error: '+esc(res.error));return;}
+  chatJobId = res.data.job_id;
+  chatPlan = res.data.plan;
+  renderTroubleshootPlan(chatPlan, chatJobId);
+}
+
+function renderTroubleshootPlan(plan, jobId){
+  const riskLevel = plan.risk_level||'low';
+  const riskColor = riskLevel==='high'?'var(--red)':riskLevel==='medium'?'var(--yellow)':'var(--green)';
+  let html = `<div class="plan-card">
+    <h4>Diagnosis</h4>
+    <p style="margin-bottom:0.75rem">${esc(plan.diagnosis)}</p>
+    <p style="font-size:12px;color:${riskColor}">Risk: ${esc(riskLevel.toUpperCase())}</p>
+    <h4 style="margin-top:0.75rem">Fix Steps</h4>`;
+
+  (plan.steps||[]).forEach(step=>{
+    html+=`<div class="step-row" id="step-${jobId}-${step.id}">
+      <span class="step-title">${esc(step.title)}</span>
+      ${step.risky?'<span class="risky-badge">RISKY</span>':''}
+      <button class="step-exec-btn" onclick="execStep('${jobId}','${step.id}',this)">Run</button>
+    </div>
+    <div id="step-out-${jobId}-${step.id}" style="display:none"></div>`;
+  });
+
+  html+=`<div style="margin-top:0.75rem">
+    <button class="verify-btn" onclick="runVerify('${jobId}')">Run Verification</button>
+  </div></div>`;
+  appendMsg('ai', html);
+}
+
+async function execStep(jobId, stepId, btn){
+  btn.disabled=true; btn.textContent='Running…';
+  const res = await api('/api/execute_step',{method:'POST',body:JSON.stringify({job_id:parseInt(jobId),step_id:stepId})});
+  btn.textContent='Done';
+  const outEl = document.getElementById(`step-out-${jobId}-${stepId}`);
+  outEl.style.display='';
+  if(res.ok){
+    outEl.innerHTML=`<div class="step-output">${esc(res.data.output)}</div>
+      <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(res.data.summary)}</div>`;
+  } else {
+    outEl.innerHTML=`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
+  }
+}
+
+async function runVerify(jobId){
+  appendMsg('system','<span class="spinner"></span> Running verification…');
+  const res = await api('/api/verify',{method:'POST',body:JSON.stringify({job_id:parseInt(jobId)})});
+  const msgs = document.getElementById('chat-messages');
+  msgs.removeChild(msgs.lastChild);
+  if(res.ok){
+    appendMsg('ai',`<strong>Verification</strong><br>${esc(res.data.summary)}`, res.data.output);
+  } else {
+    appendMsg('system','Verification error: '+esc(res.error));
+  }
+}
+
+async function startBuild(iid, msg){
+  appendMsg('system','<span class="spinner"></span> Collecting system specs…');
+  const res = await api('/api/build/plan',{method:'POST',body:JSON.stringify({instance_id:iid,message:msg})});
+  const msgs = document.getElementById('chat-messages');
+  msgs.removeChild(msgs.lastChild);
+
+  if(!res.ok){appendMsg('system','Error: '+esc(res.error));return;}
+  chatJobId = res.data.job_id;
+  chatPlan = res.data.plan;
+  renderBuildPlan(chatPlan, chatJobId);
+}
+
+function renderBuildPlan(plan, jobId){
+  const reqMet = plan.requirements_met;
+  const issues = plan.requirements_issues||[];
+  let html=`<div class="plan-card">
+    <h4>Build Plan — ${esc(plan.intent)}</h4>
+    <p style="margin-bottom:0.25rem"><strong>Method:</strong> ${esc(plan.method)}</p>
+    <p style="margin-bottom:0.5rem;color:${reqMet?'var(--green)':'var(--red)'}">
+      Requirements: ${reqMet?'Met ✓':'Not met ✗'}
+    </p>`;
+  if(issues.length){
+    html+=`<ul style="color:var(--yellow);font-size:12px;margin-bottom:0.75rem;margin-left:1.2rem">
+      ${issues.map(i=>`<li>${esc(i)}</li>`).join('')}
+    </ul>`;
+  }
+
+  (plan.phases||[]).forEach(phase=>{
+    html+=`<div class="phase-header">Phase ${phase.id}: ${esc(phase.name)}</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:0.5rem">
+        ${esc(phase.description)} (~${phase.estimated_minutes}m${phase.risky?' ⚠':''})</p>`;
+    (phase.steps||[]).forEach(step=>{
+      html+=`<div class="step-row" id="bstep-${jobId}-${phase.id}-${step.id}">
+        <span class="step-title">${esc(step.title)}</span>
+        <button class="step-exec-btn" onclick="execBuildStep('${jobId}','${phase.id}','${step.id}',this)">Run</button>
+      </div>
+      <div id="bstep-out-${jobId}-${phase.id}-${step.id}" style="display:none"></div>`;
+    });
+  });
+
+  html+=`<div style="margin-top:0.75rem">
+    <button class="verify-btn" onclick="runPostInstall('${jobId}')">Post Install</button>
+  </div></div>`;
+  appendMsg('ai', html);
+}
+
+async function execBuildStep(jobId, phaseId, stepId, btn){
+  btn.disabled=true; btn.textContent='Running…';
+  const res = await api('/api/build/execute_step',{method:'POST',
+    body:JSON.stringify({job_id:parseInt(jobId),phase_id:phaseId,step_id:stepId})});
+  btn.textContent='Done';
+  const outEl = document.getElementById(`bstep-out-${jobId}-${phaseId}-${stepId}`);
+  outEl.style.display='';
+  if(res.ok){
+    outEl.innerHTML=`<div class="step-output">${esc(res.data.output)}</div>
+      <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(res.data.summary)}</div>`;
+  } else {
+    outEl.innerHTML=`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
+  }
+}
+
+async function runPostInstall(jobId){
+  appendMsg('system','<span class="spinner"></span> Collecting credentials & endpoints…');
+  const res = await api('/api/build/post_install',{method:'POST',body:JSON.stringify({job_id:parseInt(jobId)})});
+  const msgs = document.getElementById('chat-messages');
+  msgs.removeChild(msgs.lastChild);
+  if(res.ok){
+    appendMsg('ai',`<strong>Post-Install Summary</strong><br>${esc(res.data.summary)}`);
+  } else {
+    appendMsg('system','Post-install error: '+esc(res.error));
+  }
+}
+
+async function startReplicate(srcId, tgtId, msg){
+  appendMsg('system','<span class="spinner"></span> Generating replication plan…');
+  const res = await api('/api/replicate/plan',{method:'POST',body:JSON.stringify({
+    source_instance_id:srcId, target_instance_id:tgtId})});
+  const msgs = document.getElementById('chat-messages');
+  msgs.removeChild(msgs.lastChild);
+  if(!res.ok){appendMsg('system','Error: '+esc(res.error));return;}
+  chatJobId=res.data.job_id;
+  chatPlan=res.data.plan;
+  renderReplicatePlan(chatPlan, chatJobId);
+}
+
+function renderReplicatePlan(plan, jobId){
+  let html=`<div class="plan-card">
+    <h4>Replication Plan</h4>
+    <p style="margin-bottom:0.5rem">${esc(plan.summary)}</p>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:0.5rem">Source role: ${esc(plan.source_role)}</p>`;
+  if(plan.warnings?.length){
+    html+=`<div style="color:var(--yellow);font-size:12px;margin-bottom:0.75rem">
+      ⚠ ${plan.warnings.map(esc).join('<br>⚠ ')}</div>`;
+  }
+  (plan.phases||[]).forEach(phase=>{
+    html+=`<div class="phase-header">Phase ${phase.id}: ${esc(phase.name)}</div>`;
+    (phase.steps||[]).forEach(step=>{
+      html+=`<div class="step-row">
+        <span class="step-title">${esc(step.title)}</span>
+        <button class="step-exec-btn" onclick="execReplStep('${jobId}','${phase.id}','${step.id}',this)">Run</button>
+      </div>
+      <div id="replstep-out-${jobId}-${phase.id}-${step.id}" style="display:none"></div>`;
+    });
+  });
+  html+=`<div style="margin-top:0.75rem;display:flex;gap:0.75rem">
+    <button class="verify-btn" onclick="runReplVerify('${jobId}')">Post-Verify</button>
+    <button class="btn-sm" onclick="savePlaybook('${jobId}')">Save Playbook to Target</button>
+  </div></div>`;
+  appendMsg('ai', html);
+}
+
+async function execReplStep(jobId, phaseId, stepId, btn){
+  btn.disabled=true; btn.textContent='Running…';
+  const res = await api(`/api/replicate/${jobId}/step`,{method:'POST',
+    body:JSON.stringify({phase_id:phaseId,step_id:stepId})});
+  btn.textContent='Done';
+  const outEl = document.getElementById(`replstep-out-${jobId}-${phaseId}-${stepId}`);
+  outEl.style.display='';
+  outEl.innerHTML=res.ok
+    ?`<div class="step-output">${esc(res.data.output)}</div>`
+    :`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
+}
+
+async function runReplVerify(jobId){
+  appendMsg('system','<span class="spinner"></span> Running post-verification…');
+  const res = await api(`/api/replicate/${jobId}/verify`,{method:'POST'});
+  const msgs = document.getElementById('chat-messages');
+  msgs.removeChild(msgs.lastChild);
+  appendMsg(res.ok?'ai':'system', res.ok
+    ?`<strong>Verification</strong><br>${esc(res.data.output)}`
+    :'Error: '+esc(res.error));
+}
+
+async function savePlaybook(jobId){
+  const res = await api(`/api/replicate/${jobId}/playbook`,{method:'POST',body:JSON.stringify({})});
+  appendMsg('system', res.ok
+    ?`Playbook saved to ${esc(res.data.path)} on target.`
+    :'Error: '+esc(res.error));
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Job History
+// ──────────────────────────────────────────────────────────────────────────────
+async function loadJobs(){
+  const iid = document.getElementById('job-filter-instance').value;
+  const jtype = document.getElementById('job-filter-type').value;
+  let url='/api/jobs?';
+  if(iid) url+='instance_id='+iid+'&';
+  if(jtype) url+='type='+jtype;
+  const res = await api(url);
+  const jobs = res.data||[];
+  const tbody = document.getElementById('jobs-tbody');
+  tbody.innerHTML = jobs.length ? jobs.map(j=>`
+    <tr>
+      <td>${j.id}</td>
+      <td>${esc(j.instance_label||j.instance_id||'?')}</td>
+      <td>${esc(j.type)}</td>
+      <td class="job-link" onclick="openJobPanel(${j.id})">${esc(j.title)}</td>
+      <td><span class="${badgeClass(j.status)}">${esc(j.status)}</span></td>
+      <td>${fmtDate(j.started_at)}</td>
+      <td>${fmtDur(j.duration_sec)}</td>
+      <td><button class="btn-sm btn-danger" onclick="deleteJob(${j.id})">✕</button></td>
+    </tr>`).join('') : '<tr><td colspan="8" class="empty-msg">No jobs found.</td></tr>';
+}
+
+async function openJobPanel(jid){
+  const res = await api('/api/jobs/'+jid);
+  const job = res.data;
+  document.getElementById('panel-title').textContent=`Job #${jid} — ${job.title}`;
+  let html=`<div style="margin-bottom:1rem">
+    <span class="${badgeClass(job.status)}">${esc(job.status)}</span>
+    <span style="margin-left:0.75rem;font-size:12px;color:var(--muted)">${fmtDate(job.started_at)}</span>
+  </div>`;
+  if(job.result){html+=`<p style="font-size:12px;color:var(--muted);margin-bottom:1rem">${esc(job.result)}</p>`;}
+  const steps = job.steps||[];
+  if(steps.length){
+    html+=`<h4 style="color:var(--accent);margin-bottom:0.5rem">Steps</h4>`;
+    steps.forEach(s=>{
+      const cmds = JSON.parse(s.commands||'[]');
+      html+=`<div class="step-detail">
+        <div class="step-detail-title">${esc(s.title||s.step_id)} 
+          <span class="${s.success?'inline-ok':'inline-err'}" style="font-size:11px;padding:1px 6px;border-radius:3px">
+            ${s.success?'✓ OK':'✗ FAIL'}
+          </span>
+        </div>
+        <div class="step-detail-cmds">${cmds.map(esc).join('\n')}</div>
+        <div class="step-detail-output">${esc(s.output||'')}</div>
+      </div>`;
+    });
+  } else {
+    html+='<p class="empty-msg">No steps recorded.</p>';
+  }
+  document.getElementById('panel-body').innerHTML=html;
+  document.getElementById('side-panel').classList.add('open');
+}
+
+function closePanel(){
+  document.getElementById('side-panel').classList.remove('open');
+}
+
+async function deleteJob(jid){
+  if(!confirm('Delete this job?'))return;
+  await api('/api/jobs/'+jid,{method:'DELETE'});
+  loadJobs();
+}
+
+document.getElementById('job-filter-instance').onchange=loadJobs;
+document.getElementById('job-filter-type').onchange=loadJobs;
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Study Reports
+// ──────────────────────────────────────────────────────────────────────────────
+async function loadStudies(){
+  const iid = document.getElementById('study-filter-instance').value;
+  let url='/api/studies';
+  if(iid) url+='?instance_id='+iid;
+  const res = await api(url);
+  const studies = res.data||[];
+  const el = document.getElementById('studies-list');
+  el.innerHTML = studies.length ? studies.map(s=>`
+    <div class="study-card">
+      <div class="study-info">
+        <div><strong>${esc(s.instance_label||s.instance_id)}</strong></div>
+        <div style="font-size:12px;color:var(--muted)">${fmtDate(s.created_at)}</div>
+      </div>
+      <div class="study-actions">
+        <button class="btn-sm" onclick="window.open('/api/studies/${s.id}/html','_blank')">HTML Report</button>
+        <button class="btn-sm btn-danger" onclick="deleteStudy(${s.id})">Delete</button>
+      </div>
+    </div>`).join('') : '<p class="empty-msg">No study reports.</p>';
+}
+
+async function deleteStudy(sid){
+  if(!confirm('Delete this study report?'))return;
+  await api('/api/studies/'+sid,{method:'DELETE'});
+  loadStudies();
+}
+
+document.getElementById('study-filter-instance').onchange=loadStudies;
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Alerts & Schedule
+// ──────────────────────────────────────────────────────────────────────────────
+async function loadNotifyConfig(){
+  const res = await api('/api/notifications/config');
+  const c = res.data||{};
+  document.getElementById('cfg-slack-webhook').value=c.slack_webhook||'';
+  document.getElementById('cfg-enabled').checked=!!c.enabled;
+  document.getElementById('cfg-notify-jobs').checked=!!c.notify_jobs;
+  document.getElementById('cfg-notify-studies').checked=!!c.notify_all_studies;
+  document.getElementById('cfg-notify-unreachable').checked=!!c.notify_unreachable;
+  document.getElementById('cfg-alert-failed-svcs').checked=!!c.alert_on_failed_services;
+  document.getElementById('cfg-score-below').value=c.alert_score_below||70;
+  document.getElementById('cfg-smtp-host').value=c.smtp_host||'';
+  document.getElementById('cfg-smtp-port').value=c.smtp_port||587;
+  document.getElementById('cfg-smtp-user').value=c.smtp_user||'';
+  document.getElementById('cfg-smtp-pass').value=c.smtp_pass||'';
+  document.getElementById('cfg-email-from').value=c.email_from||'';
+  document.getElementById('cfg-email-to').value=c.email_to||'';
+  document.getElementById('cfg-smtp-tls').checked=c.smtp_tls!==false;
+}
+
+async function saveNotifyConfig(){
+  const cfg={
+    slack_webhook:document.getElementById('cfg-slack-webhook').value,
+    enabled:document.getElementById('cfg-enabled').checked,
+    notify_jobs:document.getElementById('cfg-notify-jobs').checked,
+    notify_all_studies:document.getElementById('cfg-notify-studies').checked,
+    notify_unreachable:document.getElementById('cfg-notify-unreachable').checked,
+    alert_on_failed_services:document.getElementById('cfg-alert-failed-svcs').checked,
+    alert_score_below:parseInt(document.getElementById('cfg-score-below').value)||70,
+    smtp_host:document.getElementById('cfg-smtp-host').value,
+    smtp_port:parseInt(document.getElementById('cfg-smtp-port').value)||587,
+    smtp_user:document.getElementById('cfg-smtp-user').value,
+    smtp_pass:document.getElementById('cfg-smtp-pass').value,
+    email_from:document.getElementById('cfg-email-from').value,
+    email_to:document.getElementById('cfg-email-to').value,
+    smtp_tls:document.getElementById('cfg-smtp-tls').checked,
+  };
+  const res = await api('/api/notifications/config',{method:'POST',body:JSON.stringify(cfg)});
+  setMsg('notify-msg', res.ok?'Saved successfully':'Error: '+res.error, res.ok);
+}
+
+async function testNotify(){
+  const cfg={slack_webhook:document.getElementById('cfg-slack-webhook').value,
+    smtp_host:document.getElementById('cfg-smtp-host').value,
+    smtp_user:document.getElementById('cfg-smtp-user').value,
+    smtp_pass:document.getElementById('cfg-smtp-pass').value,
+    email_from:document.getElementById('cfg-email-from').value,
+    email_to:document.getElementById('cfg-email-to').value,
+    smtp_port:parseInt(document.getElementById('cfg-smtp-port').value),
+    smtp_tls:document.getElementById('cfg-smtp-tls').checked};
+  const res = await api('/api/notifications/test',{method:'POST',body:JSON.stringify(cfg)});
+  const r = res.data||{};
+  setMsg('notify-msg', `Slack: ${r.slack||'skipped'} | Email: ${r.email||'skipped'}`,
+    r.slack==='ok'||r.email==='ok');
+}
+
+// Schedule
+document.getElementById('sched-mode').onchange=function(){
+  document.getElementById('sched-interval-row').style.display=this.value==='interval'?'':'none';
+  document.getElementById('sched-cron-row').style.display=this.value==='cron'?'':'none';
+};
+
+document.getElementById('sched-instance-select').onchange=function(){
+  loadScheduleFor(parseInt(this.value));
+};
+
+async function loadScheduleFor(iid){
+  if(!iid)return;
+  const res = await api('/api/instances/'+iid+'/schedule');
+  const s = res.data||{};
+  document.getElementById('sched-enabled').checked=!!s.enabled;
+  document.getElementById('sched-mode').value=s.mode||'interval';
+  document.getElementById('sched-hours').value=s.interval_hours||6;
+  document.getElementById('sched-cron').value=s.cron_expr||'0 */6 * * *';
+  document.getElementById('sched-mode').dispatchEvent(new Event('change'));
+}
+
+async function saveSchedule(){
+  const iid=parseInt(document.getElementById('sched-instance-select').value);
+  if(!iid){setMsg('sched-msg','Select an instance',false);return;}
+  const data={
+    enabled:document.getElementById('sched-enabled').checked,
+    mode:document.getElementById('sched-mode').value,
+    interval_hours:parseFloat(document.getElementById('sched-hours').value)||6,
+    cron_expr:document.getElementById('sched-cron').value||'0 */6 * * *',
+  };
+  const res=await api('/api/instances/'+iid+'/schedule',{method:'POST',body:JSON.stringify(data)});
+  setMsg('sched-msg',res.ok?'Saved':'Error: '+res.error,res.ok);
+  loadSchedulerJobs();
+}
+
+async function deleteSchedule(){
+  const iid=parseInt(document.getElementById('sched-instance-select').value);
+  if(!iid)return;
+  await api('/api/instances/'+iid+'/schedule',{method:'DELETE'});
+  setMsg('sched-msg','Schedule removed',true);
+  loadSchedulerJobs();
+}
+
+async function loadSchedulerJobs(){
+  const res=await api('/api/scheduler/jobs');
+  const jobs=res.data||[];
+  const el=document.getElementById('scheduler-jobs-list');
+  el.innerHTML = jobs.length ? jobs.map(j=>
+    `<div style="margin-bottom:4px"><code style="color:var(--accent)">${esc(j.id)}</code>
+     — next: ${esc(j.next_run||'not scheduled')}</div>`).join('') :
+    '<div style="color:var(--muted)">No active scheduler jobs</div>';
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Init
+// ──────────────────────────────────────────────────────────────────────────────
+(async function init(){
+  await loadInstances();
+  await loadDashboard();
+  // Refresh instances every 30s
+  setInterval(async()=>{
+    await loadInstances();
+    if(activeTab==='dashboard') loadDashboard();
+  }, 30000);
+})();
+</script>
+</body>
+</html>
