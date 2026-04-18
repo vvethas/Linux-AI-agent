@@ -1,0 +1,914 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Linux AI Agent</title>
+<style>
+/* ── Reset & base ── */
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d0d0d;--surface:#141414;--surface2:#1c1c1c;--border:#2a2a2a;
+  --accent:#4ec9b0;--magenta:#b87fd4;--green:#4caf50;--red:#e05252;
+  --yellow:#e5b840;--blue:#5b9bd5;--text:#d4d4d4;--muted:#9ca3af;
+}
+body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+a{color:var(--accent);text-decoration:none}
+button{cursor:pointer;border:none;outline:none;font-family:inherit}
+input,select,textarea{font-family:inherit;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:.9rem;width:100%}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);outline:none}
+/* ── Header ── */
+header{background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:0;flex-shrink:0;height:50px}
+header .logo{color:var(--accent);font-weight:700;font-size:1.1rem;margin-right:28px;white-space:nowrap}
+.tabs{display:flex;height:100%;gap:2px}
+.tab{background:none;color:var(--muted);padding:0 16px;font-size:.88rem;border-bottom:2px solid transparent;transition:.15s}
+.tab.active{color:var(--text);border-bottom-color:var(--accent)}
+.tab:hover{color:var(--text)}
+/* ── Layout ── */
+.layout{display:flex;flex:1;overflow:hidden}
+/* ── Sidebar ── */
+.sidebar{width:240px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;flex-shrink:0}
+.sidebar-head{padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.sidebar-head span{font-size:.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.btn-sm{background:var(--surface2);color:var(--accent);padding:4px 10px;border-radius:6px;font-size:.8rem;border:1px solid var(--border)}
+.btn-sm:hover{background:var(--border)}
+.instance-list{overflow-y:auto;flex:1}
+.instance-item{padding:10px 14px;border-bottom:1px solid #1e1e1e;cursor:pointer;display:flex;flex-direction:column;gap:4px;transition:.1s}
+.instance-item:hover,.instance-item.active{background:var(--surface2)}
+.inst-row{display:flex;align-items:center;gap:8px}
+.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.dot.online{background:var(--green)} .dot.offline{background:var(--red)} .dot.unknown,.dot.auth_error{background:var(--yellow)}
+.inst-label{font-size:.88rem;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inst-host{font-size:.75rem;color:var(--muted)}
+.inst-actions{display:flex;gap:4px}
+.icon-btn{background:none;color:var(--muted);font-size:.85rem;padding:2px 5px;border-radius:4px;border:1px solid transparent}
+.icon-btn:hover{color:var(--text);border-color:var(--border);background:var(--surface)}
+/* ── Main ── */
+.main{flex:1;overflow-y:auto;padding:20px}
+/* ── Panels ── */
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:16px}
+.panel h2{font-size:1rem;font-weight:600;color:var(--accent);margin-bottom:14px}
+.panel h3{font-size:.9rem;color:var(--muted);margin-bottom:10px}
+/* ── Dashboard ── */
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+@media(max-width:900px){.stat-grid{grid-template-columns:repeat(2,1fr)}}
+.stat-card{background:var(--surface2);border-radius:10px;padding:14px}
+.stat-card .val{font-size:1.7rem;font-weight:700;margin-top:4px}
+.stat-card .lbl{font-size:.78rem;color:var(--muted);text-transform:uppercase}
+.tile-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.tile{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px}
+.tile-header{display:flex;align-items:center;gap:10px}
+.health-ring{width:48px;height:48px;border-radius:50%;border:5px solid var(--green);display:grid;place-items:center;font-weight:700;font-size:.9rem;flex-shrink:0}
+.tile-name{font-weight:600;font-size:.9rem}
+.tile-role,.tile-host{font-size:.75rem;color:var(--muted)}
+.tile-btns{display:flex;gap:6px;flex-wrap:wrap}
+.tile-btn{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:4px 9px;border-radius:6px;font-size:.78rem}
+.tile-btn:hover{border-color:var(--accent);color:var(--accent)}
+/* ── Activity feed ── */
+.activity-item{padding:8px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-size:.84rem}
+.activity-item:last-child{border-bottom:none}
+.type-badge{padding:2px 7px;border-radius:999px;font-size:.72rem;font-weight:600;border:1px solid}
+.type-badge.troubleshoot{color:var(--blue);border-color:var(--blue)}
+.type-badge.build{color:var(--magenta);border-color:var(--magenta)}
+.type-badge.study{color:var(--accent);border-color:var(--accent)}
+.type-badge.replicate{color:var(--yellow);border-color:var(--yellow)}
+/* ── Chat ── */
+.chat-wrap{display:flex;flex-direction:column;height:calc(100vh - 110px)}
+.chat-messages{flex:1;overflow-y:auto;padding:12px 0;display:flex;flex-direction:column;gap:10px}
+.msg{max-width:760px;padding:10px 14px;border-radius:10px;font-size:.88rem;line-height:1.55}
+.msg.user{background:var(--surface2);align-self:flex-end;border:1px solid var(--border)}
+.msg.agent{background:var(--surface);border:1px solid var(--border);align-self:flex-start}
+.msg.agent pre{background:#111;padding:10px;border-radius:6px;overflow-x:auto;font-size:.82rem;margin-top:8px}
+.plan-box{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px;margin:8px 0}
+.step-item{border-left:3px solid var(--border);padding:8px 12px;margin:6px 0;font-size:.85rem}
+.step-item.risky{border-left-color:var(--red)}
+.step-item.done{border-left-color:var(--green)}
+.step-item.running{border-left-color:var(--yellow)}
+.step-cmds{font-family:ui-monospace,Menlo,monospace;background:#111;padding:6px 10px;border-radius:6px;font-size:.8rem;margin-top:4px}
+.chat-input-row{display:flex;gap:8px;padding:12px 0 0}
+.chat-input-row textarea{flex:1;resize:none;height:60px;line-height:1.4}
+.btn-primary{background:var(--accent);color:#0d0d0d;font-weight:700;padding:8px 18px;border-radius:8px;font-size:.9rem}
+.btn-primary:hover{opacity:.88}
+.btn-secondary{background:var(--surface2);color:var(--text);border:1px solid var(--border);padding:8px 14px;border-radius:8px;font-size:.88rem}
+.btn-secondary:hover{border-color:var(--accent)}
+.btn-danger{background:#3a1010;color:var(--red);border:1px solid var(--red);padding:6px 12px;border-radius:6px;font-size:.82rem}
+.btn-danger:hover{background:var(--red);color:#fff}
+.btn-approve{background:#0d2a1a;color:var(--green);border:1px solid var(--green);padding:7px 14px;border-radius:7px;font-size:.85rem}
+.btn-approve:hover{background:var(--green);color:#000}
+/* ── Job History ── */
+.filter-row{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.filter-row select,.filter-row input{max-width:200px;width:auto}
+table.jobs-table{width:100%;border-collapse:collapse;font-size:.84rem}
+.jobs-table th{text-align:left;padding:8px 10px;color:var(--muted);font-size:.78rem;text-transform:uppercase;border-bottom:1px solid var(--border)}
+.jobs-table td{padding:8px 10px;border-bottom:1px solid #1e1e1e;vertical-align:middle}
+.jobs-table tr:hover td{background:var(--surface2);cursor:pointer}
+.status-badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:.75rem;font-weight:600;border:1px solid}
+.status-badge.completed{color:var(--green);border-color:var(--green)}
+.status-badge.failed{color:var(--red);border-color:var(--red)}
+.status-badge.running{color:var(--yellow);border-color:var(--yellow)}
+.status-badge.planned{color:var(--blue);border-color:var(--blue)}
+.status-badge.pending{color:var(--muted);border-color:var(--muted)}
+/* ── Side panel (job detail) ── */
+.side-panel{position:fixed;top:0;right:0;width:520px;height:100vh;background:var(--surface);border-left:1px solid var(--border);z-index:200;display:flex;flex-direction:column;transform:translateX(100%);transition:.25s}
+.side-panel.open{transform:translateX(0)}
+.side-panel-head{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.side-panel-body{overflow-y:auto;flex:1;padding:14px 16px}
+.step-output{background:#111;padding:8px;border-radius:6px;font-size:.78rem;font-family:ui-monospace,Menlo,monospace;white-space:pre-wrap;margin-top:4px;max-height:200px;overflow-y:auto}
+/* ── Modal ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:300;display:none;place-items:center}
+.modal-overlay.show{display:grid}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:24px;width:460px;max-width:95vw;max-height:90vh;overflow-y:auto}
+.modal h2{font-size:1.05rem;color:var(--accent);margin-bottom:16px}
+.form-row{margin-bottom:12px}
+.form-row label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:4px}
+.form-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+/* ── Alerts & Schedule ── */
+.settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:700px){.settings-grid{grid-template-columns:1fr}}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)}
+.toggle-row label{font-size:.88rem}
+.toggle{position:relative;width:38px;height:20px;flex-shrink:0}
+.toggle input{opacity:0;width:0;height:0;position:absolute}
+.toggle-slider{position:absolute;inset:0;background:#333;border-radius:20px;transition:.2s;cursor:pointer}
+.toggle-slider:before{content:'';position:absolute;width:14px;height:14px;bottom:3px;left:3px;background:#888;border-radius:50%;transition:.2s}
+.toggle input:checked + .toggle-slider{background:var(--accent)}
+.toggle input:checked + .toggle-slider:before{transform:translateX(18px);background:#fff}
+/* ── Study reports ── */
+.study-row{padding:10px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-size:.85rem}
+.ring-sm{width:36px;height:36px;border-radius:50%;border:4px solid var(--green);display:grid;place-items:center;font-weight:700;font-size:.75rem;flex-shrink:0}
+/* ── Utility ── */
+.muted{color:var(--muted);font-size:.82rem}
+.bold{font-weight:600}
+.error-text{color:var(--red)}
+.green-text{color:var(--green)}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+.hidden{display:none}
+code,pre{font-family:ui-monospace,Menlo,monospace}
+.pre-wrap{white-space:pre-wrap}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="logo">⚡ Linux AI Agent</div>
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('dashboard')">Dashboard</button>
+    <button class="tab" onclick="switchTab('chat')">Chat</button>
+    <button class="tab" onclick="switchTab('jobs')">Job History</button>
+    <button class="tab" onclick="switchTab('studies')">Study Reports</button>
+    <button class="tab" onclick="switchTab('alerts')">Alerts &amp; Schedule</button>
+  </div>
+</header>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-head">
+      <span>Instances</span>
+      <button class="btn-sm" onclick="showAddInstance()">＋ Add</button>
+    </div>
+    <div class="instance-list" id="instanceList"></div>
+  </div>
+
+  <!-- Main content area -->
+  <div class="main" id="mainArea">
+
+    <!-- Dashboard -->
+    <div id="tab-dashboard">
+      <div class="stat-grid" id="statGrid">
+        <div class="stat-card"><div class="lbl">Total Instances</div><div class="val" id="stat-total">–</div></div>
+        <div class="stat-card"><div class="lbl">Online</div><div class="val green-text" id="stat-online">–</div></div>
+        <div class="stat-card"><div class="lbl">Offline</div><div class="val error-text" id="stat-offline">–</div></div>
+        <div class="stat-card"><div class="lbl">Avg Health</div><div class="val" id="stat-health">–</div></div>
+      </div>
+      <div class="panel">
+        <h2>Instances</h2>
+        <div class="tile-grid" id="tileGrid"></div>
+      </div>
+      <div class="panel">
+        <h2>Recent Activity</h2>
+        <div id="activityFeed"></div>
+      </div>
+    </div>
+
+    <!-- Chat -->
+    <div id="tab-chat" class="hidden">
+      <div class="panel" style="margin-bottom:8px;padding:10px 14px;display:flex;align-items:center;gap:10px">
+        <span style="font-size:.85rem;color:var(--muted)">Instance:</span>
+        <select id="chatInstance" style="width:220px" onchange="chatInstanceChanged()">
+          <option value="">— select —</option>
+        </select>
+        <span id="chatStatus" class="muted" style="font-size:.82rem"></span>
+      </div>
+      <div class="chat-wrap panel" style="padding:14px">
+        <div class="chat-messages" id="chatMessages">
+          <div class="msg agent">👋 Select an instance and describe what you need — I'll classify your request and guide you through the fix or deployment.</div>
+        </div>
+        <div class="chat-input-row">
+          <textarea id="chatInput" placeholder="Describe a problem or infrastructure goal…" onkeydown="chatKeyDown(event)"></textarea>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <button class="btn-primary" onclick="sendChat()">Send</button>
+            <button class="btn-secondary" onclick="clearChat()">Clear</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Job History -->
+    <div id="tab-jobs" class="hidden">
+      <div class="panel">
+        <h2>Job History</h2>
+        <div class="filter-row">
+          <select id="jobFilterInstance" onchange="loadJobs()">
+            <option value="">All Instances</option>
+          </select>
+          <select id="jobFilterType" onchange="loadJobs()">
+            <option value="">All Types</option>
+            <option value="troubleshoot">Troubleshoot</option>
+            <option value="build">Build</option>
+            <option value="study">Study</option>
+            <option value="replicate">Replicate</option>
+          </select>
+        </div>
+        <table class="jobs-table">
+          <thead><tr>
+            <th>#</th><th>Type</th><th>Title</th><th>Status</th>
+            <th>Instance</th><th>Started</th><th>Duration</th><th></th>
+          </tr></thead>
+          <tbody id="jobsBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Study Reports -->
+    <div id="tab-studies" class="hidden">
+      <div class="panel">
+        <h2>Study Reports</h2>
+        <div class="filter-row">
+          <select id="studyFilterInstance" onchange="loadStudies()">
+            <option value="">All Instances</option>
+          </select>
+        </div>
+        <div id="studyList"></div>
+      </div>
+    </div>
+
+    <!-- Alerts & Schedule -->
+    <div id="tab-alerts" class="hidden">
+      <div class="panel">
+        <h2>Notification Settings</h2>
+        <div class="settings-grid">
+          <div>
+            <div class="form-row"><label>Slack Webhook URL</label><input id="cfg-slack_webhook" type="text" placeholder="https://hooks.slack.com/…"></div>
+            <div class="toggle-row"><label>Enable Notifications</label><label class="toggle"><input type="checkbox" id="cfg-enabled"><span class="toggle-slider"></span></label></div>
+            <div class="toggle-row"><label>Notify All Studies</label><label class="toggle"><input type="checkbox" id="cfg-notify_all_studies"><span class="toggle-slider"></span></label></div>
+            <div class="toggle-row"><label>Notify Job Completions</label><label class="toggle"><input type="checkbox" id="cfg-notify_jobs" checked><span class="toggle-slider"></span></label></div>
+            <div class="toggle-row"><label>Notify Unreachable</label><label class="toggle"><input type="checkbox" id="cfg-notify_unreachable" checked><span class="toggle-slider"></span></label></div>
+            <div class="toggle-row"><label>Alert on Failed Services</label><label class="toggle"><input type="checkbox" id="cfg-alert_on_failed_services" checked><span class="toggle-slider"></span></label></div>
+            <div class="form-row" style="margin-top:12px"><label>Alert if Health Score Below</label><input id="cfg-alert_score_below" type="number" value="70" style="width:80px"></div>
+          </div>
+          <div>
+            <div class="form-row"><label>SMTP Host</label><input id="cfg-smtp_host" type="text" placeholder="smtp.gmail.com"></div>
+            <div class="form-row"><label>SMTP Port</label><input id="cfg-smtp_port" type="number" value="587" style="width:80px"></div>
+            <div class="form-row"><label>SMTP User</label><input id="cfg-smtp_user" type="text"></div>
+            <div class="form-row"><label>SMTP Password</label><input id="cfg-smtp_pass" type="password"></div>
+            <div class="form-row"><label>From Email</label><input id="cfg-email_from" type="email"></div>
+            <div class="form-row"><label>To Email</label><input id="cfg-email_to" type="email"></div>
+            <div class="toggle-row"><label>Use STARTTLS</label><label class="toggle"><input type="checkbox" id="cfg-smtp_tls" checked><span class="toggle-slider"></span></label></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:16px">
+          <button class="btn-primary" onclick="saveNotifyConfig()">Save Settings</button>
+          <button class="btn-secondary" onclick="testNotify()">Send Test</button>
+        </div>
+        <div id="notifyResult" class="muted" style="margin-top:8px"></div>
+      </div>
+      <div class="panel" id="schedulePanel">
+        <h2>Instance Schedule</h2>
+        <p class="muted" id="scheduleInstanceNote">Select an instance from the sidebar to configure its schedule.</p>
+        <div id="scheduleForm" class="hidden">
+          <div class="form-row"><label>Mode</label>
+            <select id="sched-mode" onchange="schedModeChange()">
+              <option value="interval">Interval (every N hours)</option>
+              <option value="cron">Cron expression</option>
+            </select>
+          </div>
+          <div id="sched-interval-row" class="form-row"><label>Hours between checks</label><input id="sched-hours" type="number" value="6" min="1" style="width:80px"></div>
+          <div id="sched-cron-row" class="form-row hidden"><label>Cron expression (min hr day mon dow)</label><input id="sched-cron" type="text" placeholder="0 */6 * * *"></div>
+          <div class="toggle-row"><label>Enabled</label><label class="toggle"><input type="checkbox" id="sched-enabled" checked><span class="toggle-slider"></span></label></div>
+          <div style="display:flex;gap:8px;margin-top:14px">
+            <button class="btn-primary" onclick="saveSchedule()">Save Schedule</button>
+            <button class="btn-danger" onclick="deleteSchedule()">Remove</button>
+            <button class="btn-secondary" onclick="triggerNow()">Run Now</button>
+          </div>
+          <div id="schedResult" class="muted" style="margin-top:8px"></div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /layout -->
+
+<!-- Add Instance Modal -->
+<div class="modal-overlay" id="addModal">
+  <div class="modal">
+    <h2>Add Instance</h2>
+    <div class="form-row"><label>Label</label><input id="inst-label" type="text" placeholder="prod-web-01"></div>
+    <div class="form-row"><label>Host / IP</label><input id="inst-host" type="text" placeholder="192.168.1.10"></div>
+    <div class="form-row"><label>Port</label><input id="inst-port" type="number" value="22" style="width:80px"></div>
+    <div class="form-row"><label>Username</label><input id="inst-user" type="text" placeholder="root"></div>
+    <div class="form-row"><label>Auth Type</label>
+      <select id="inst-auth" onchange="authTypeChange()">
+        <option value="key">SSH Key</option>
+        <option value="password">Password</option>
+      </select>
+    </div>
+    <div class="form-row" id="keyPathRow"><label>Key Path (on control server)</label><input id="inst-key" type="text" placeholder="/root/.ssh/id_rsa"></div>
+    <div class="form-row hidden" id="pwRow"><label>Password</label><input id="inst-pw" type="password"></div>
+    <div class="form-row"><label>Tags (comma-separated)</label><input id="inst-tags" type="text" placeholder="prod, web, nginx"></div>
+    <div id="addInstResult" class="muted" style="margin-top:4px"></div>
+    <div class="form-actions">
+      <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary" onclick="submitAddInstance()">Add &amp; Test</button>
+    </div>
+  </div>
+</div>
+
+<!-- Job Detail Side Panel -->
+<div class="side-panel" id="sidePanel">
+  <div class="side-panel-head">
+    <span id="sidePanelTitle" style="font-weight:600"></span>
+    <button class="icon-btn" onclick="closePanel()" style="font-size:1.1rem">✕</button>
+  </div>
+  <div class="side-panel-body" id="sidePanelBody"></div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let instances = [];
+let selectedInstanceId = null;
+let chatJobId = null;
+let chatPlan = null;
+let chatPhase = null; // for build: current phase index
+let chatStepIndex = 0;
+let chatHistory = [];
+let scheduleInstanceId = null;
+
+// ── Bootstrap ───────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  loadInstances();
+  loadDashboard();
+  loadNotifyConfig();
+  setInterval(loadInstances, 30000);
+  setInterval(() => { if (document.getElementById('tab-dashboard').style.display !== 'none') loadDashboard(); }, 60000);
+});
+
+// ── Tab switching ────────────────────────────────────────────────────────────
+function switchTab(name) {
+  ['dashboard','chat','jobs','studies','alerts'].forEach(t => {
+    document.getElementById('tab-' + t).classList.add('hidden');
+  });
+  document.getElementById('tab-' + name).classList.remove('hidden');
+  document.querySelectorAll('.tab').forEach((el,i) => {
+    el.classList.remove('active');
+    if(['dashboard','chat','jobs','studies','alerts'][i] === name) el.classList.add('active');
+  });
+  if (name === 'jobs') loadJobs();
+  if (name === 'studies') loadStudies();
+}
+
+// ── Instances ────────────────────────────────────────────────────────────────
+async function loadInstances() {
+  const res = await fetch('/api/instances').then(r=>r.json());
+  instances = res.instances || [];
+  renderSidebar();
+  populateInstanceSelects();
+}
+
+function renderSidebar() {
+  const el = document.getElementById('instanceList');
+  if (!instances.length) { el.innerHTML = '<div class="muted" style="padding:14px">No instances yet.</div>'; return; }
+  el.innerHTML = instances.map(i => `
+    <div class="instance-item${i.id===selectedInstanceId?' active':''}" onclick="selectInstance(${i.id})">
+      <div class="inst-row">
+        <span class="dot ${i.last_status||'unknown'}"></span>
+        <span class="inst-label">${esc(i.label)}</span>
+        <div class="inst-actions">
+          <button class="icon-btn" title="Study" onclick="event.stopPropagation();studyInstance(${i.id})">⊕</button>
+          <button class="icon-btn" title="Schedule" onclick="event.stopPropagation();openSchedule(${i.id})">⏱</button>
+          <button class="icon-btn" title="Remove" onclick="event.stopPropagation();removeInstance(${i.id})">✕</button>
+        </div>
+      </div>
+      <div class="inst-host">${esc(i.host)}:${i.port||22}</div>
+    </div>
+  `).join('');
+}
+
+function populateInstanceSelects() {
+  ['chatInstance','jobFilterInstance','studyFilterInstance'].forEach(id => {
+    const sel = document.getElementById(id);
+    const cur = sel.value;
+    const opts = instances.map(i => `<option value="${i.id}">${esc(i.label)}</option>`).join('');
+    sel.innerHTML = (id === 'chatInstance' ? '<option value="">— select —</option>' : '<option value="">All Instances</option>') + opts;
+    sel.value = cur;
+  });
+}
+
+function selectInstance(id) {
+  selectedInstanceId = id;
+  renderSidebar();
+}
+
+async function removeInstance(id) {
+  if (!confirm('Remove this instance?')) return;
+  await fetch(`/api/instances/${id}`, {method:'DELETE'});
+  loadInstances(); loadDashboard();
+}
+
+async function studyInstance(id) {
+  const inst = instances.find(i=>i.id===id);
+  if (!inst) return;
+  addChatMsg('agent', `<span class="spinner"></span> Running deep study on <b>${esc(inst.label)}</b>…`);
+  switchTab('chat');
+  document.getElementById('chatInstance').value = id;
+  selectedInstanceId = id;
+  const res = await fetch(`/api/instances/${id}/study`, {method:'POST'}).then(r=>r.json());
+  if (res.error) { addChatMsg('agent', `<span class="error-text">Study failed: ${esc(res.error)}</span>`); return; }
+  const s = res.report?.summary || {};
+  addChatMsg('agent', `
+    <b>Study complete</b> — <span style="color:var(--accent)">${esc(inst.label)}</span><br>
+    Health: <b>${s.health_score||0}/100</b> &nbsp;|&nbsp; Role: ${esc(s.role||'unknown')}<br>
+    <span class="muted">${esc(s.headline||'')}</span>
+    <br><a href="/api/studies/${res.study_id}/html" target="_blank" style="font-size:.82rem">📄 Open full report</a>
+  `);
+  loadStudies();
+}
+
+// ── Dashboard ────────────────────────────────────────────────────────────────
+async function loadDashboard() {
+  const d = await fetch('/api/dashboard').then(r=>r.json());
+  const s = d.stats || {};
+  document.getElementById('stat-total').textContent = s.total_instances ?? '–';
+  document.getElementById('stat-online').textContent = s.online_count ?? '–';
+  document.getElementById('stat-offline').textContent = s.offline_count ?? '–';
+  document.getElementById('stat-health').textContent = s.avg_health_score ? s.avg_health_score + '%' : '–';
+
+  const tg = document.getElementById('tileGrid');
+  const tiles = d.tiles || [];
+  if (!tiles.length) { tg.innerHTML = '<div class="muted">No instances yet.</div>'; }
+  else tg.innerHTML = tiles.map(t => {
+    const i = t.instance;
+    const score = t.health_score || 0;
+    const rc = score >= 80 ? 'var(--green)' : score >= 60 ? 'var(--yellow)' : 'var(--red)';
+    return `<div class="tile">
+      <div class="tile-header">
+        <div class="health-ring" style="border-color:${rc}">${score}</div>
+        <div>
+          <div class="tile-name">${esc(i.label)}</div>
+          <div class="tile-role">${esc(t.role||'unknown')} &bull; <span class="dot ${i.last_status||'unknown'}" style="display:inline-block;vertical-align:middle"></span> ${esc(i.last_status||'unknown')}</div>
+          <div class="tile-host">${esc(i.host)}</div>
+        </div>
+      </div>
+      <div class="tile-btns">
+        <button class="tile-btn" onclick="switchTab('chat');document.getElementById('chatInstance').value=${i.id}">💬 Chat</button>
+        <button class="tile-btn" onclick="studyInstance(${i.id})">⊕ Study</button>
+        <button class="tile-btn" onclick="openSchedule(${i.id})">⏱ Schedule</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  const af = document.getElementById('activityFeed');
+  const act = d.activity || [];
+  if (!act.length) { af.innerHTML = '<div class="muted">No recent jobs.</div>'; }
+  else af.innerHTML = act.map(j => `
+    <div class="activity-item">
+      <span class="type-badge ${j.type}">${j.type}</span>
+      <span style="flex:1">${esc(j.title)}</span>
+      <span class="status-badge ${j.status}">${j.status}</span>
+      <span class="muted">${fmtDate(j.started_at)}</span>
+    </div>
+  `).join('');
+}
+
+// ── Add Instance Modal ────────────────────────────────────────────────────────
+function showAddInstance() { document.getElementById('addModal').classList.add('show'); }
+function closeModal() { document.getElementById('addModal').classList.remove('show'); document.getElementById('addInstResult').textContent=''; }
+function authTypeChange() {
+  const pw = document.getElementById('inst-auth').value === 'password';
+  document.getElementById('pwRow').classList.toggle('hidden', !pw);
+  document.getElementById('keyPathRow').classList.toggle('hidden', pw);
+}
+async function submitAddInstance() {
+  const payload = {
+    label: document.getElementById('inst-label').value.trim(),
+    host: document.getElementById('inst-host').value.trim(),
+    port: parseInt(document.getElementById('inst-port').value)||22,
+    username: document.getElementById('inst-user').value.trim(),
+    auth_type: document.getElementById('inst-auth').value,
+    key_path: document.getElementById('inst-key').value.trim()||null,
+    password: document.getElementById('inst-pw').value||null,
+    tags: document.getElementById('inst-tags').value,
+  };
+  const res = await fetch('/api/instances', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(r=>r.json());
+  const msgEl = document.getElementById('addInstResult');
+  if (res.error) { msgEl.innerHTML=`<span class="error-text">${esc(res.error)}</span>`; return; }
+  const ok = res.ssh_test?.ok;
+  msgEl.innerHTML = ok
+    ? `<span class="green-text">✔ Added & SSH OK</span>`
+    : `<span style="color:var(--yellow)">Added — SSH issue: ${esc(res.ssh_test?.reason||'?')}</span>`;
+  await loadInstances(); loadDashboard();
+  setTimeout(closeModal, 1200);
+}
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
+function chatKeyDown(e) { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } }
+function chatInstanceChanged() {
+  selectedInstanceId = parseInt(document.getElementById('chatInstance').value)||null;
+  const inst = instances.find(i=>i.id===selectedInstanceId);
+  document.getElementById('chatStatus').textContent = inst ? `${inst.host} — ${inst.last_status||'unknown'}` : '';
+}
+function clearChat() {
+  chatJobId=null; chatPlan=null; chatStepIndex=0; chatHistory=[];
+  document.getElementById('chatMessages').innerHTML = '<div class="msg agent">👋 Select an instance and describe what you need.</div>';
+}
+
+function addChatMsg(role, html) {
+  const el = document.createElement('div');
+  el.className = `msg ${role}`;
+  el.innerHTML = html;
+  const box = document.getElementById('chatMessages');
+  box.appendChild(el);
+  box.scrollTop = box.scrollHeight;
+  return el;
+}
+
+async function sendChat() {
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if (!text) return;
+  if (!selectedInstanceId) { addChatMsg('agent','<span class="error-text">Please select an instance first.</span>'); return; }
+  input.value = '';
+  addChatMsg('user', esc(text));
+
+  // If we have an active plan waiting for approval, check for "approve" or step execution
+  if (chatPlan && chatPlan._waiting_approval) {
+    if (/approve|yes|ok|go|run|execute/i.test(text)) {
+      chatPlan._waiting_approval = false;
+      await executePlan();
+    } else {
+      addChatMsg('agent', 'Execution cancelled. You can describe a new issue.');
+      chatPlan = null; chatJobId = null;
+    }
+    return;
+  }
+
+  const thinkMsg = addChatMsg('agent', '<span class="spinner"></span> Classifying…');
+
+  // Step 1: classify
+  let intent;
+  try {
+    const cr = await fetch('/api/classify', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})}).then(r=>r.json());
+    intent = cr.intent || 'troubleshoot';
+  } catch(e) { thinkMsg.innerHTML='<span class="error-text">Classification failed.</span>'; return; }
+
+  thinkMsg.innerHTML = `<span class="spinner"></span> Intent: <b>${intent}</b> — collecting system data…`;
+
+  if (intent === 'troubleshoot') {
+    const res = await fetch('/api/diagnose', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({instance_id: selectedInstanceId, issue: text})
+    }).then(r=>r.json());
+    if (res.error) { thinkMsg.innerHTML=`<span class="error-text">${esc(res.error)}</span>`; return; }
+    chatJobId = res.job_id;
+    chatPlan = res.plan;
+    chatPlan._type = 'troubleshoot';
+    chatPlan._waiting_approval = true;
+    thinkMsg.innerHTML = renderTroubleshootPlan(res.plan);
+  } else {
+    const res = await fetch('/api/build/plan', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({instance_id: selectedInstanceId, request: text})
+    }).then(r=>r.json());
+    if (res.error) { thinkMsg.innerHTML=`<span class="error-text">${esc(res.error)}</span>`; return; }
+    chatJobId = res.job_id;
+    chatPlan = res.plan;
+    chatPlan._type = 'build';
+    chatPlan._waiting_approval = true;
+    thinkMsg.innerHTML = renderBuildPlan(res.plan);
+  }
+}
+
+function renderTroubleshootPlan(plan) {
+  const riskColor = plan.risk_level==='high'?'var(--red)':plan.risk_level==='medium'?'var(--yellow)':'var(--green)';
+  const steps = (plan.steps||[]).map((s,i) => `
+    <div class="step-item${s.risky?' risky':''}">
+      <b>Step ${i+1}: ${esc(s.title)}</b>${s.risky?' <span style="color:var(--red);font-size:.78rem">⚠ risky</span>':''}
+      <div class="muted">${esc(s.description||'')}</div>
+      <div class="step-cmds">${(s.commands||[]).map(c=>esc(c)).join('\n')}</div>
+    </div>`).join('');
+  return `<div class="plan-box">
+    <div><b>Diagnosis:</b> ${esc(plan.diagnosis||'')}</div>
+    <div style="margin:6px 0"><b>Risk:</b> <span style="color:${riskColor}">${esc(plan.risk_level||'?').toUpperCase()}</span></div>
+    ${steps}
+    <div style="margin-top:8px"><b>Verification:</b> <code>${esc(plan.verification||'')}</code></div>
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <button class="btn-approve" onclick="approvePlan()">✔ Approve &amp; Execute</button>
+      <button class="btn-danger" onclick="cancelPlan()">✗ Cancel</button>
+    </div>
+  </div>`;
+}
+
+function renderBuildPlan(plan) {
+  const phases = (plan.phases||[]).map((ph,i) => `
+    <div style="margin-bottom:8px;padding:8px;background:var(--surface2);border-radius:8px;border:1px solid var(--border)">
+      <b>Phase ${i+1}: ${esc(ph.name)}</b>${ph.risky?' <span style="color:var(--red);font-size:.78rem">⚠ risky</span>':''} 
+      <span class="muted">(~${ph.estimated_minutes||'?'}m)</span>
+      <div class="muted" style="margin-top:4px">${esc(ph.description||'')}</div>
+    </div>`).join('');
+  return `<div class="plan-box">
+    <div><b>Intent:</b> ${esc(plan.intent||'')}</div>
+    <div style="margin:4px 0"><b>Method:</b> ${esc(plan.method||'')}</div>
+    <div style="margin:4px 0"><b>Est. time:</b> ~${plan.estimated_total_minutes||'?'} minutes</div>
+    ${plan.requirements_met===false ? `<div class="error-text" style="margin:6px 0">⚠ Requirements issues: ${(plan.requirements_issues||[]).map(x=>esc(x)).join(', ')}</div>` : ''}
+    <div style="margin-top:10px"><b>Phases:</b></div>
+    ${phases}
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <button class="btn-approve" onclick="approvePlan()">✔ Approve &amp; Execute</button>
+      <button class="btn-danger" onclick="cancelPlan()">✗ Cancel</button>
+    </div>
+  </div>`;
+}
+
+function approvePlan() {
+  if (!chatPlan) return;
+  chatPlan._waiting_approval = false;
+  addChatMsg('user', 'Approved — executing plan…');
+  executePlan();
+}
+function cancelPlan() {
+  chatPlan = null; chatJobId = null;
+  addChatMsg('agent', 'Plan cancelled.');
+}
+
+async function executePlan() {
+  if (!chatPlan) return;
+  if (chatPlan._type === 'troubleshoot') await executeTroubleshootPlan();
+  else await executeBuildPlan();
+}
+
+async function executeTroubleshootPlan() {
+  const steps = chatPlan.steps || [];
+  const msgEl = addChatMsg('agent', 'Executing steps…');
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    msgEl.innerHTML = `<span class="spinner"></span> Step ${i+1}/${steps.length}: ${esc(step.title)}`;
+    const res = await fetch('/api/execute_step', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({job_id:chatJobId, instance_id:selectedInstanceId, step, phase:'main', final: i===steps.length-1})
+    }).then(r=>r.json());
+    if (!res.success) {
+      msgEl.innerHTML = `<span class="error-text">Step ${i+1} failed: ${esc(step.title)}</span><br><pre>${esc(getStdout(res.outputs))}</pre>`;
+      return;
+    }
+  }
+  // Run verification
+  if (chatPlan.verification) {
+    const vr = await fetch('/api/verify', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instance_id:selectedInstanceId,command:chatPlan.verification})}).then(r=>r.json());
+    msgEl.innerHTML = vr.verification?.success
+      ? `<span class="green-text">✔ All steps completed &amp; verified!</span><br><pre>${esc(vr.verification.stdout||'')}</pre>`
+      : `<span style="color:var(--yellow)">Steps done, verification failed.</span><br><pre>${esc(vr.verification?.stdout||'')}</pre>`;
+  } else {
+    msgEl.innerHTML = '<span class="green-text">✔ All steps completed!</span>';
+  }
+  loadJobs();
+}
+
+async function executeBuildPlan() {
+  const phases = chatPlan.phases || [];
+  const msgEl = addChatMsg('agent', 'Starting build…');
+  for (let pi = 0; pi < phases.length; pi++) {
+    const phase = phases[pi];
+    const steps = phase.steps || [];
+    for (let si = 0; si < steps.length; si++) {
+      const step = steps[si];
+      const isFinal = pi===phases.length-1 && si===steps.length-1;
+      msgEl.innerHTML = `<span class="spinner"></span> Phase ${pi+1}: ${esc(phase.name)} — Step ${si+1}/${steps.length}: ${esc(step.title)}`;
+      const res = await fetch('/api/build/execute_step', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({job_id:chatJobId, instance_id:selectedInstanceId, step, phase:`phase_${pi+1}`, final:isFinal})
+      }).then(r=>r.json());
+      if (!res.success) {
+        msgEl.innerHTML = `<span class="error-text">Phase ${pi+1} Step ${si+1} failed: ${esc(step.title)}</span><br><pre>${esc(getStdout(res.outputs))}</pre>`;
+        return;
+      }
+    }
+  }
+  // Post-install
+  const pi = chatPlan.post_install || {};
+  if ((pi.credential_commands||[]).length || (pi.verification_commands||[]).length) {
+    const allCmds = [...(pi.credential_commands||[]), ...(pi.verification_commands||[])];
+    const pr = await fetch('/api/build/post_install', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instance_id:selectedInstanceId,commands:allCmds})}).then(r=>r.json());
+    const allOk = (pr.results||[]).every(r=>r.success);
+    let out = (pr.results||[]).map(r=>r.stdout).join('\n');
+    msgEl.innerHTML = `<span class="${allOk?'green-text':'error-text'}">${allOk?'✔ Build complete! Post-install done.':'⚠ Build done with post-install issues.'}</span><br><pre>${esc(out.slice(0,2000))}</pre>`;
+    if ((pi.endpoints||[]).length) msgEl.innerHTML += `<div style="margin-top:8px"><b>Endpoints:</b> ${(pi.endpoints||[]).map(e=>`<code>${esc(e)}</code>`).join(', ')}</div>`;
+  } else {
+    msgEl.innerHTML = '<span class="green-text">✔ Build complete!</span>';
+  }
+  loadJobs();
+}
+
+function getStdout(outputs) {
+  if (!outputs||!outputs.length) return '';
+  return (outputs[outputs.length-1].stdout||'') + (outputs[outputs.length-1].stderr||'');
+}
+
+// ── Job History ───────────────────────────────────────────────────────────────
+async function loadJobs() {
+  const iid = document.getElementById('jobFilterInstance').value;
+  const tp = document.getElementById('jobFilterType').value;
+  let url = '/api/jobs?';
+  if (iid) url += `instance_id=${iid}&`;
+  if (tp) url += `type=${tp}&`;
+  const data = await fetch(url).then(r=>r.json());
+  const jobs = data.jobs || [];
+  const tbody = document.getElementById('jobsBody');
+  if (!jobs.length) { tbody.innerHTML = '<tr><td colspan="8" class="muted" style="text-align:center;padding:20px">No jobs found.</td></tr>'; return; }
+  tbody.innerHTML = jobs.map(j => {
+    const inst = instances.find(i=>i.id===j.instance_id);
+    return `<tr onclick="openJobPanel(${j.id})">
+      <td>#${j.id}</td>
+      <td><span class="type-badge ${j.type}">${j.type}</span></td>
+      <td>${esc(j.title||'')}</td>
+      <td><span class="status-badge ${j.status}">${j.status}</span></td>
+      <td>${inst ? esc(inst.label) : (j.instance_id||'–')}</td>
+      <td>${fmtDate(j.started_at)}</td>
+      <td>${j.duration_sec != null ? j.duration_sec+'s' : '–'}</td>
+      <td><button class="btn-danger" style="padding:3px 8px;font-size:.75rem" onclick="event.stopPropagation();deleteJob(${j.id})">Del</button></td>
+    </tr>`;
+  }).join('');
+}
+
+async function openJobPanel(id) {
+  const job = await fetch(`/api/jobs/${id}`).then(r=>r.json());
+  document.getElementById('sidePanelTitle').textContent = `Job #${job.id} — ${job.type} (${job.status})`;
+  const steps = job.steps || [];
+  let html = `<div style="margin-bottom:10px">
+    <div class="muted">Title: ${esc(job.title||'')}</div>
+    <div class="muted">Started: ${fmtDate(job.started_at)} | Duration: ${job.duration_sec!=null?job.duration_sec+'s':'running'}</div>
+    ${job.result ? `<div class="muted">Result: ${esc(job.result)}</div>` : ''}
+  </div>`;
+  if (!steps.length) html += '<div class="muted">No steps recorded.</div>';
+  else html += steps.map((s,i) => {
+    let out = '';
+    try { const o = typeof s.output === 'string' ? JSON.parse(s.output) : s.output; out = JSON.stringify(o,null,2); } catch { out = s.output||''; }
+    return `<div style="margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="status-badge ${s.success?'completed':'failed'}">${s.success?'ok':'fail'}</span>
+        <b>${esc(s.title||`Step ${i+1}`)}</b>
+        <span class="muted" style="font-size:.75rem">${fmtDate(s.ran_at)}</span>
+      </div>
+      <div class="step-output">${esc(out.slice(0,2000))}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('sidePanelBody').innerHTML = html;
+  document.getElementById('sidePanel').classList.add('open');
+}
+
+function closePanel() { document.getElementById('sidePanel').classList.remove('open'); }
+
+async function deleteJob(id) {
+  if (!confirm('Delete job?')) return;
+  await fetch(`/api/jobs/${id}`, {method:'DELETE'});
+  loadJobs();
+}
+
+// ── Study Reports ─────────────────────────────────────────────────────────────
+async function loadStudies() {
+  const iid = document.getElementById('studyFilterInstance').value;
+  let url = '/api/studies?';
+  if (iid) url += `instance_id=${iid}&`;
+  const data = await fetch(url).then(r=>r.json());
+  const studies = data.studies || [];
+  const el = document.getElementById('studyList');
+  if (!studies.length) { el.innerHTML = '<div class="muted">No study reports yet.</div>'; return; }
+  el.innerHTML = studies.map(s => {
+    const report = s.report_json || {};
+    const sum = report.summary || {};
+    const score = sum.health_score || 0;
+    const rc = score>=80?'var(--green)':score>=60?'var(--yellow)':'var(--red)';
+    const inst = instances.find(i=>i.id===s.instance_id);
+    return `<div class="study-row">
+      <div class="ring-sm" style="border-color:${rc}">${score}</div>
+      <div style="flex:1">
+        <div class="bold">${inst?esc(inst.label):`Instance ${s.instance_id}`}</div>
+        <div class="muted">${esc(sum.headline||'')} &bull; ${esc(sum.role||'unknown')} &bull; ${fmtDate(s.created_at)}</div>
+      </div>
+      <a href="/api/studies/${s.id}/html" target="_blank" class="btn-secondary" style="padding:4px 10px;font-size:.78rem">📄 Report</a>
+      <button class="btn-danger" style="padding:4px 8px;font-size:.75rem" onclick="deleteStudy(${s.id})">Del</button>
+    </div>`;
+  }).join('');
+}
+
+async function deleteStudy(id) {
+  if (!confirm('Delete study report?')) return;
+  await fetch(`/api/studies/${id}`, {method:'DELETE'});
+  loadStudies();
+}
+
+// ── Notifications ─────────────────────────────────────────────────────────────
+async function loadNotifyConfig() {
+  const data = await fetch('/api/notifications/config').then(r=>r.json());
+  const cfg = data.config || {};
+  const boolKeys = ['enabled','notify_all_studies','notify_jobs','notify_unreachable','alert_on_failed_services','smtp_tls'];
+  for (const [k,v] of Object.entries(cfg)) {
+    const el = document.getElementById('cfg-'+k);
+    if (!el) continue;
+    if (boolKeys.includes(k)) el.checked = !!v;
+    else el.value = v ?? '';
+  }
+}
+
+async function saveNotifyConfig() {
+  const cfg = {};
+  const boolKeys = ['enabled','notify_all_studies','notify_jobs','notify_unreachable','alert_on_failed_services','smtp_tls'];
+  ['slack_webhook','smtp_host','smtp_user','smtp_pass','email_from','email_to'].forEach(k => {
+    cfg[k] = document.getElementById('cfg-'+k)?.value || '';
+  });
+  ['smtp_port','alert_score_below'].forEach(k => {
+    cfg[k] = parseInt(document.getElementById('cfg-'+k)?.value)||0;
+  });
+  boolKeys.forEach(k => { cfg[k] = document.getElementById('cfg-'+k)?.checked ?? false; });
+  await fetch('/api/notifications/config', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
+  document.getElementById('notifyResult').innerHTML = '<span class="green-text">✔ Saved</span>';
+  setTimeout(()=>{ document.getElementById('notifyResult').textContent=''; }, 2000);
+}
+
+async function testNotify() {
+  const res = await fetch('/api/notifications/test', {method:'POST'}).then(r=>r.json());
+  const el = document.getElementById('notifyResult');
+  el.innerHTML = res.sent ? '<span class="green-text">✔ Test sent</span>' : `<span class="error-text">Not sent: ${esc(res.slack_error||res.email_error||res.reason||'?')}</span>`;
+}
+
+// ── Schedule ──────────────────────────────────────────────────────────────────
+async function openSchedule(instanceId) {
+  scheduleInstanceId = instanceId;
+  const inst = instances.find(i=>i.id===instanceId);
+  switchTab('alerts');
+  document.getElementById('scheduleInstanceNote').textContent = inst ? `Configuring schedule for: ${inst.label}` : '';
+  document.getElementById('scheduleForm').classList.remove('hidden');
+  const data = await fetch(`/api/instances/${instanceId}/schedule`).then(r=>r.json());
+  const s = data.schedule;
+  if (s) {
+    document.getElementById('sched-mode').value = s.mode||'interval';
+    document.getElementById('sched-hours').value = s.interval_hours||6;
+    document.getElementById('sched-cron').value = s.cron_expr||'';
+    document.getElementById('sched-enabled').checked = !!s.enabled;
+    schedModeChange();
+  }
+}
+
+function schedModeChange() {
+  const isCron = document.getElementById('sched-mode').value === 'cron';
+  document.getElementById('sched-interval-row').classList.toggle('hidden', isCron);
+  document.getElementById('sched-cron-row').classList.toggle('hidden', !isCron);
+}
+
+async function saveSchedule() {
+  if (!scheduleInstanceId) return;
+  const mode = document.getElementById('sched-mode').value;
+  const payload = {
+    mode,
+    interval_hours: parseInt(document.getElementById('sched-hours').value)||6,
+    cron_expr: document.getElementById('sched-cron').value||null,
+    enabled: document.getElementById('sched-enabled').checked,
+  };
+  const res = await fetch(`/api/instances/${scheduleInstanceId}/schedule`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(r=>r.json());
+  document.getElementById('schedResult').innerHTML = res.schedule ? '<span class="green-text">✔ Schedule saved</span>' : `<span class="error-text">Error</span>`;
+}
+
+async function deleteSchedule() {
+  if (!scheduleInstanceId) return;
+  await fetch(`/api/instances/${scheduleInstanceId}/schedule`, {method:'DELETE'});
+  document.getElementById('schedResult').innerHTML = '<span class="muted">Schedule removed</span>';
+}
+
+async function triggerNow() {
+  if (!scheduleInstanceId) return;
+  const res = await fetch(`/api/instances/${scheduleInstanceId}/trigger`, {method:'POST'}).then(r=>r.json());
+  document.getElementById('schedResult').innerHTML = '<span class="green-text">✔ Triggered in background</span>';
+}
+
+// ── Utility ───────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtDate(iso) {
+  if (!iso) return '–';
+  try { return new Date(iso).toLocaleString(); } catch { return iso; }
+}
+</script>
+</body>
+</html>
