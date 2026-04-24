@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# install-service.sh — Install the Linux AI Agent as a systemd service.
+# Run once as root (or with sudo) after cloning the repository.
+# Usage:  sudo bash linux-agent/install-service.sh
+set -e
+
+SERVICE_NAME="linux-ai-agent"
+SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+
+# ── require root ──────────────────────────────────────────────────────────────
+if [ "$EUID" -ne 0 ]; then
+  echo "ERROR: Please run as root: sudo bash $0"
+  exit 1
+fi
+
+# ── detect script location ────────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ── python check ──────────────────────────────────────────────────────────────
+if ! command -v python3 &>/dev/null; then
+  echo "ERROR: python3 is not installed. Please install Python 3.9+ and re-run."
+  exit 1
+fi
+
+# ── collect OPENAI_API_KEY ────────────────────────────────────────────────────
+if [ -z "$OPENAI_API_KEY" ]; then
+  read -rsp "Enter your OPENAI_API_KEY: " OPENAI_API_KEY
+  echo
+fi
+
+# ── determine the user that should own the service ───────────────────────────
+DEFAULT_USER="${SUDO_USER:-$USER}"
+read -rp "Run service as which user? [${DEFAULT_USER}]: " SERVICE_USER
+SERVICE_USER="${SERVICE_USER:-$DEFAULT_USER}"
+
+# ── virtual environment ───────────────────────────────────────────────────────
+VENV_DIR="$SCRIPT_DIR/.venv"
+if [ ! -d "$VENV_DIR" ]; then
+  echo "Creating Python virtual environment …"
+  python3 -m venv "$VENV_DIR"
+fi
+
+echo "Installing Python dependencies …"
+"$VENV_DIR/bin/pip" install -q --upgrade pip
+"$VENV_DIR/bin/pip" install -q -r "$SCRIPT_DIR/requirements.txt"
+
+mkdir -p "$SCRIPT_DIR/data"
+touch "$SCRIPT_DIR/agent/__init__.py"
+
+# ── write systemd unit file ───────────────────────────────────────────────────
+cat > "$SERVICE_FILE" <<EOF
+[Unit]
+Description=Linux AI Infrastructure Agent
+After=network.target
+
+[Service]
+Type=simple
+User=${SERVICE_USER}
+WorkingDirectory=${SCRIPT_DIR}
+Environment="OPENAI_API_KEY=${OPENAI_API_KEY}"
+ExecStart=${VENV_DIR}/bin/python ${SCRIPT_DIR}/web/server.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+echo "Wrote ${SERVICE_FILE}"
+
+# ── enable and start ──────────────────────────────────────────────────────────
+systemctl daemon-reload
+systemctl enable "$SERVICE_NAME"
+systemctl restart "$SERVICE_NAME"
+
+echo ""
+echo "✅  Service '${SERVICE_NAME}' is now running."
+echo "    Check status : sudo systemctl status ${SERVICE_NAME}"
+echo "    View logs    : sudo journalctl -u ${SERVICE_NAME} -f"
+echo "    Stop         : sudo systemctl stop ${SERVICE_NAME}"
+echo "    Uninstall    : sudo systemctl disable --now ${SERVICE_NAME} && sudo rm ${SERVICE_FILE}"
