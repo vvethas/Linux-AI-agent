@@ -426,7 +426,15 @@ h2.section-title{color:var(--accent)}
         <option value="password">Password</option>
       </select>
     </div>
-    <div class="form-field-full" id="m-key-row"><label>Key Path</label><input id="m-key" placeholder="~/.ssh/id_rsa"/></div>
+    <div class="form-field-full" id="m-key-row">
+      <label>PEM Key File</label>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button type="button" class="btn-sm" onclick="document.getElementById('m-pem-input').click()">Choose .pem file</button>
+        <span id="m-pem-name" style="font-size:13px;color:var(--muted)">No file chosen</span>
+        <input type="file" id="m-pem-input" accept=".pem" style="display:none" onchange="handlePemUpload(this)"/>
+        <input type="hidden" id="m-key"/>
+      </div>
+    </div>
     <div class="form-field-full" id="m-pass-row" style="display:none"><label>Password</label><input type="password" id="m-pass"/></div>
     <div class="form-field-full"><label>Tags (comma-separated)</label><input id="m-tags" placeholder="prod, openstack"/></div>
     <div id="m-test-msg" style="margin-top:6px"></div>
@@ -583,6 +591,35 @@ document.getElementById('m-auth').onchange=function(){
 function closeModal(){
   document.getElementById('modal-overlay').classList.remove('open');
   document.getElementById('m-test-msg').innerHTML='';
+  document.getElementById('m-pem-input').value='';
+  document.getElementById('m-pem-name').textContent='No file chosen';
+  document.getElementById('m-key').value='';
+}
+
+async function handlePemUpload(input){
+  const file = input.files[0];
+  if(!file) return;
+  if(file.size > 16384){
+    document.getElementById('m-pem-name').textContent = 'File too large (max 16 KB for a PEM key)';
+    input.value='';
+    return;
+  }
+  document.getElementById('m-pem-name').textContent = 'Uploading…';
+  const fd = new FormData();
+  fd.append('file', file);
+  try{
+    const res = await fetch('/api/upload_key',{method:'POST',body:fd}).then(r=>r.json());
+    if(!res.ok){
+      document.getElementById('m-pem-name').textContent = 'Upload failed: '+(res.error||'unknown');
+      document.getElementById('m-key').value='';
+    } else {
+      document.getElementById('m-pem-name').textContent = res.data.filename;
+      document.getElementById('m-key').value = res.data.path;
+    }
+  } catch(e){
+    document.getElementById('m-pem-name').textContent = 'Upload error';
+    document.getElementById('m-key').value='';
+  }
 }
 
 async function testInstanceModal(){
@@ -613,6 +650,7 @@ function modalFormData(){
 async function addInstance(){
   const data = modalFormData();
   if(!data.label||!data.host||!data.username){setMsg('m-test-msg','Label, host, and username required',false);return;}
+  if(data.auth_type==='key'&&!data.key_path){setMsg('m-test-msg','Please upload a .pem key file',false);return;}
   const res = await api('/api/instances',{method:'POST',body:JSON.stringify(data)});
   if(!res.ok){setMsg('m-test-msg',res.error,false);return;}
   closeModal();

@@ -5,6 +5,7 @@ Listens on 0.0.0.0:7070.
 import json
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -699,6 +700,47 @@ def test_notify():
     body = request.json or {}
     results = _notify.send_test_notification(body)
     return _ok(results)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PEM key upload
+# ─────────────────────────────────────────────────────────────────────────────
+
+KEYS_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "keys")
+
+
+@app.route("/api/upload_key", methods=["POST"])
+def upload_key():
+    if "file" not in request.files:
+        return _err("No file provided")
+    f = request.files["file"]
+    filename = f.filename or ""
+    if not filename.lower().endswith(".pem"):
+        return _err("Only .pem files are accepted")
+
+    # Validate that the file looks like a PEM private key
+    content = f.read()
+    try:
+        text = content.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        return _err("File is not valid UTF-8 text")
+    if "PRIVATE KEY" not in text:
+        return _err("File does not appear to be a PEM private key")
+
+    os.makedirs(KEYS_DIR, mode=0o700, exist_ok=True)
+    # Use a timestamp-prefixed name to avoid collisions while keeping the original stem
+    safe_stem = re.sub(r"[^a-zA-Z0-9_\-]", "_", filename[:-4])[:64] or "key"
+    dest_name = f"{int(time.time())}_{safe_stem}.pem"
+    dest_path = os.path.realpath(os.path.join(KEYS_DIR, dest_name))
+    # Confirm the resolved path is still inside KEYS_DIR
+    if not dest_path.startswith(os.path.realpath(KEYS_DIR) + os.sep):
+        return _err("Invalid filename")
+
+    with open(dest_path, "wb") as fh:
+        fh.write(content)
+    os.chmod(dest_path, 0o600)
+
+    return _ok({"path": dest_path, "filename": dest_name})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
