@@ -6,6 +6,7 @@ set -e
 
 SERVICE_NAME="linux-ai-agent"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+PORT=7070
 
 # ── require root ──────────────────────────────────────────────────────────────
 if [ "$EUID" -ne 0 ]; then
@@ -70,14 +71,43 @@ EOF
 
 echo "Wrote ${SERVICE_FILE}"
 
+# ── open firewall port ────────────────────────────────────────────────────────
+if command -v ufw &>/dev/null; then
+  echo "Opening port ${PORT}/tcp in ufw …"
+  ufw allow "${PORT}/tcp" > /dev/null
+elif command -v firewall-cmd &>/dev/null; then
+  echo "Opening port ${PORT}/tcp in firewalld …"
+  firewall-cmd --permanent --add-port="${PORT}/tcp" > /dev/null
+  firewall-cmd --reload > /dev/null
+else
+  echo "NOTE: No ufw or firewalld found. If a firewall is active, open port ${PORT}/tcp manually."
+fi
+
 # ── enable and start ──────────────────────────────────────────────────────────
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
 systemctl restart "$SERVICE_NAME"
 
-echo ""
-echo "✅  Service '${SERVICE_NAME}' is now running."
-echo "    Check status : sudo systemctl status ${SERVICE_NAME}"
-echo "    View logs    : sudo journalctl -u ${SERVICE_NAME} -f"
-echo "    Stop         : sudo systemctl stop ${SERVICE_NAME}"
-echo "    Uninstall    : sudo systemctl disable --now ${SERVICE_NAME} && sudo rm ${SERVICE_FILE}"
+# ── verify it came up ─────────────────────────────────────────────────────────
+sleep 3
+if systemctl is-active --quiet "$SERVICE_NAME"; then
+  # Determine the best IP to show
+  SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+  SERVER_IP="${SERVER_IP:-localhost}"
+
+  echo ""
+  echo "✅  Service '${SERVICE_NAME}' is running."
+  echo "    Open in browser : http://${SERVER_IP}:${PORT}"
+  echo ""
+  echo "    Check status : sudo systemctl status ${SERVICE_NAME}"
+  echo "    View logs    : sudo journalctl -u ${SERVICE_NAME} -f"
+  echo "    Stop         : sudo systemctl stop ${SERVICE_NAME}"
+  echo "    Uninstall    : sudo systemctl disable --now ${SERVICE_NAME} && sudo rm ${SERVICE_FILE}"
+else
+  echo ""
+  echo "❌  Service failed to start. Last 20 log lines:"
+  journalctl -u "$SERVICE_NAME" -n 20 --no-pager
+  echo ""
+  echo "Fix the error above, then run:  sudo systemctl restart ${SERVICE_NAME}"
+  exit 1
+fi
