@@ -34,6 +34,13 @@ DEFAULT_USER="${SUDO_USER:-$USER}"
 read -rp "Run service as which user? [${DEFAULT_USER}]: " SERVICE_USER
 SERVICE_USER="${SERVICE_USER:-$DEFAULT_USER}"
 
+# Validate the user actually exists on this system
+if ! id -u "$SERVICE_USER" &>/dev/null; then
+  echo "WARNING: User '${SERVICE_USER}' does not exist on this system."
+  echo "         Falling back to 'root'. Re-run and specify a valid user to change this."
+  SERVICE_USER="root"
+fi
+
 # ── virtual environment ───────────────────────────────────────────────────────
 VENV_DIR="$SCRIPT_DIR/.venv"
 if [ ! -d "$VENV_DIR" ]; then
