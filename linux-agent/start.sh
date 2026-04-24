@@ -19,9 +19,20 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# ── virtual environment ───────────────────────────────────────────────────────
+VENV_DIR="$SCRIPT_DIR/.venv"
+if [ ! -d "$VENV_DIR" ]; then
+  echo "Creating Python virtual environment …"
+  python3 -m venv "$VENV_DIR"
+fi
+
+# shellcheck source=/dev/null
+source "$VENV_DIR/bin/activate"
+
 # ── install dependencies ──────────────────────────────────────────────────────
 echo "Installing Python dependencies …"
-pip3 install -q -r requirements.txt
+pip install -q --upgrade pip
+pip install -q -r requirements.txt
 
 # ── prepare runtime directories ───────────────────────────────────────────────
 mkdir -p data
@@ -29,4 +40,4 @@ touch agent/__init__.py
 
 # ── launch ────────────────────────────────────────────────────────────────────
 echo "Starting Linux AI Infrastructure Agent on http://0.0.0.0:7070 …"
-exec python3 web/server.py
+exec python web/server.py
