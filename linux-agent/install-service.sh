@@ -56,7 +56,30 @@ mkdir -p "$SCRIPT_DIR/data"
 touch "$SCRIPT_DIR/agent/__init__.py"
 
 # ── write systemd unit file ───────────────────────────────────────────────────
-cat > "$SERVICE_FILE" <<EOF
+# When running as root, omit "User=" entirely.  Explicitly setting User=root
+# triggers a getpwnam("root") NSS lookup that can fail on containers or
+# minimal systems, producing status=217/USER even though root always exists.
+if [ "$SERVICE_USER" = "root" ]; then
+  cat > "$SERVICE_FILE" <<EOF
+[Unit]
+Description=Linux AI Infrastructure Agent
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=${SCRIPT_DIR}
+Environment="OPENAI_API_KEY=${OPENAI_API_KEY}"
+ExecStart=${VENV_DIR}/bin/python ${SCRIPT_DIR}/web/server.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+else
+  cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=Linux AI Infrastructure Agent
 After=network.target
@@ -75,6 +98,7 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
+fi
 
 echo "Wrote ${SERVICE_FILE}"
 
