@@ -155,6 +155,12 @@ def generate_html(study_row: dict) -> str:
 
     # ── Services section ──────────────────────────────────────────────────────
 
+    running_rows = "".join(
+        f'<tr><td>{_esc(s.get("name","") if isinstance(s, dict) else str(s))}</td>'
+        f'<td style="color:#aaa">{_esc(s.get("description","") if isinstance(s, dict) else "")}</td></tr>'
+        for s in (services.get("running") or [])
+    ) or '<tr><td colspan="2" style="color:#888">None</td></tr>'
+
     failed_rows = "".join(
         f'<tr style="color:#e05252"><td>{_esc(s)}</td></tr>'
         for s in (services.get("failed") or [])
@@ -163,8 +169,14 @@ def generate_html(study_row: dict) -> str:
     svc_body = (
         kv("Running", str(services.get("total_running", 0)))
         + kv("Failed", str(services.get("total_failed", 0)))
-        + f"""<table><thead><tr><th>Failed Services</th></tr></thead>
-              <tbody>{failed_rows}</tbody></table>"""
+        + f"""<table>
+              <thead><tr><th>Running Services</th><th>Description</th></tr></thead>
+              <tbody>{running_rows}</tbody>
+            </table>"""
+        + f"""<table style="margin-top:0.5rem">
+              <thead><tr><th>Failed Services</th></tr></thead>
+              <tbody>{failed_rows}</tbody>
+            </table>"""
         + analysis_p(services.get("analysis"))
     )
 

@@ -155,6 +155,7 @@ Analyze all provided system data and return ONLY valid JSON (no markdown fences)
   "services": {
     "total_running": 0,
     "total_failed": 0,
+    "running": [{"name": "<svc>", "description": "<string>"}],
     "critical": ["<svc>"],
     "failed": ["<svc>"],
     "analysis": "<string>"
