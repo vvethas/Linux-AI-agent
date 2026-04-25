@@ -608,7 +608,9 @@ async function handlePemUpload(input){
   const fd = new FormData();
   fd.append('file', file);
   try{
-    const res = await fetch('/api/upload_key',{method:'POST',body:fd}).then(r=>r.json());
+    const r = await fetch('/api/upload_key',{method:'POST',body:fd});
+    let res;
+    try{ res = await r.json(); } catch(_){ res = {ok:false, error:`Server error (HTTP ${r.status})`}; }
     if(!res.ok){
       document.getElementById('m-pem-name').textContent = 'Upload failed: '+(res.error||'unknown');
       document.getElementById('m-key').value='';
@@ -617,7 +619,7 @@ async function handlePemUpload(input){
       document.getElementById('m-key').value = res.data.path;
     }
   } catch(e){
-    document.getElementById('m-pem-name').textContent = 'Upload error';
+    document.getElementById('m-pem-name').textContent = 'Upload error: '+(e.message||e);
     document.getElementById('m-key').value='';
   }
 }

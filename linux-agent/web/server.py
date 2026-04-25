@@ -63,6 +63,12 @@ def _require_instance(instance_id):
 # Static / UI
 # ─────────────────────────────────────────────────────────────────────────────
 
+@app.errorhandler(500)
+def internal_error(exc):
+    log.exception("Unhandled server error")
+    return jsonify({"ok": False, "error": "Internal server error"}), 500
+
+
 @app.route("/")
 def index():
     return send_from_directory(TEMPLATES_DIR, "index.html")
@@ -727,7 +733,11 @@ def upload_key():
     if "PRIVATE KEY" not in text:
         return _err("File does not appear to be a PEM private key")
 
-    os.makedirs(KEYS_DIR, mode=0o700, exist_ok=True)
+    try:
+        os.makedirs(KEYS_DIR, mode=0o700, exist_ok=True)
+    except OSError as exc:
+        log.exception("Failed to create keys directory")
+        return _err(f"Cannot create keys directory: {exc.strerror}")
     # Use a timestamp-prefixed name to avoid collisions while keeping the original stem
     safe_stem = re.sub(r"[^a-zA-Z0-9_\-]", "_", filename[:-4])[:64] or "key"
     dest_name = f"{int(time.time())}_{safe_stem}.pem"
@@ -736,9 +746,13 @@ def upload_key():
     if not dest_path.startswith(os.path.realpath(KEYS_DIR) + os.sep):
         return _err("Invalid filename")
 
-    with open(dest_path, "wb") as fh:
-        fh.write(content)
-    os.chmod(dest_path, 0o600)
+    try:
+        with open(dest_path, "wb") as fh:
+            fh.write(content)
+        os.chmod(dest_path, 0o600)
+    except OSError as exc:
+        log.exception("Failed to save uploaded key")
+        return _err(f"Could not save key file: {exc.strerror}")
 
     return _ok({"path": dest_path, "filename": dest_name})
 
