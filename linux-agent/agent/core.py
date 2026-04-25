@@ -60,17 +60,18 @@ def _call_json(system: str, messages: list) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 CLASSIFY_SYSTEM = (
-    "Classify the user's message into exactly one of these three categories:\n"
+    "Classify the user's message into exactly one of these four categories:\n"
     "  troubleshoot — the user is reporting a problem, error, or failure that needs fixing.\n"
     "  build        — the user wants to deploy, install, or set up new infrastructure.\n"
+    "  configure    — the user wants to change settings, edit config files, or reconfigure existing services.\n"
     "  explore      — the user wants to inspect, query, or learn about the current state of the "
     "instance (e.g. list services, check what is running, show logs, answer a question about the system).\n"
-    "Reply with exactly one word: troubleshoot, build, or explore."
+    "Reply with exactly one word: troubleshoot, build, configure, or explore."
 )
 
 
 def classify_intent(user_message: str) -> str:
-    """Returns 'troubleshoot', 'build', or 'explore'."""
+    """Returns 'troubleshoot', 'build', 'configure', or 'explore'."""
     result = _call(
         CLASSIFY_SYSTEM,
         [{"role": "user", "content": user_message}],
@@ -78,6 +79,8 @@ def classify_intent(user_message: str) -> str:
     result = result.strip().lower()
     if "build" in result:
         return "build"
+    if "configure" in result:
+        return "configure"
     if "explore" in result:
         return "explore"
     return "troubleshoot"
@@ -290,6 +293,114 @@ def run_explore_command(title: str, cmd: str, output: str, history: list) -> str
     system = (
         "You are a Linux systems assistant. "
         "Briefly summarise the command output in 2-4 sentences for a human reader."
+    )
+    result = _call(system, history)
+    history.append({"role": "assistant", "content": result})
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature 5 — Conversational chat (ask clarifying questions, propose actions)
+# ─────────────────────────────────────────────────────────────────────────────
+
+CHAT_SYSTEM = """You are a Linux systems assistant having a conversation with a system administrator.
+Help them manage their Linux instance through natural conversation.
+
+You can:
+  1. Ask clarifying questions when the request is ambiguous or you need more detail.
+  2. Reply conversationally to general questions or small talk.
+  3. When you have enough information to take a specific action, propose it and ask for confirmation.
+
+Always reply with ONLY valid JSON (no markdown fences) in one of two forms:
+
+Conversational reply (questions, answers, clarifications):
+{
+  "type": "reply",
+  "reply": "<your message to the user>"
+}
+
+Action proposal (when you are ready to act and want user confirmation):
+{
+  "type": "action_proposal",
+  "reply": "<explain what you will do and ask the user to confirm>",
+  "action": {
+    "intent": "troubleshoot|build|configure|explore",
+    "summary": "<one-line description of the action>"
+  }
+}
+
+Guidelines:
+- troubleshoot: the user has a problem/error/failure that needs fixing.
+- build: the user wants to deploy or install new infrastructure.
+- configure: the user wants to change settings, edit config files, or reconfigure a service.
+- explore: the user wants information about the system state (logs, status, disk usage, etc.).
+- For destructive actions (troubleshoot, configure, build) ALWAYS use action_proposal so the user can confirm.
+- For read-only information requests (explore) you may use action_proposal as well, but it is optional.
+- Keep replies concise and professional."""
+
+
+def chat_reply(user_message: str, instance_label: str, history: list) -> dict:
+    """
+    Process a conversational turn.
+    Returns a dict with 'type' ('reply' | 'action_proposal') and associated fields.
+    history is mutated in place for multi-turn context.
+    """
+    content = f"[Instance: {instance_label}]\nUser: {user_message}"
+    history.append({"role": "user", "content": content})
+    result = _call_json(CHAT_SYSTEM, history)
+    history.append({"role": "assistant", "content": json.dumps(result)})
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature 6 — Configure mode
+# ─────────────────────────────────────────────────────────────────────────────
+
+CONFIGURE_SYSTEM = """You are a Linux configuration AI.
+Given system diagnostics and the user's configuration request, return ONLY valid JSON (no markdown fences):
+{
+  "intent": "<what is being configured>",
+  "risk_level": "low|medium|high",
+  "steps": [
+    {
+      "id": "<string>",
+      "title": "<string>",
+      "description": "<string>",
+      "commands": ["<cmd1>", "<cmd2>"],
+      "risky": false
+    }
+  ],
+  "verification": "<shell command to verify the configuration change>"
+}
+Always include a backup/rollback step first when modifying important config files."""
+
+
+def generate_configure_plan(diagnostics: dict, user_request: str, history: list) -> dict:
+    """
+    Generate a configuration change plan.
+    Returns parsed JSON plan.
+    """
+    content = (
+        f"Configuration request: {user_request}\n\n"
+        f"System diagnostics:\n{json.dumps(diagnostics, indent=2)}"
+    )
+    history.append({"role": "user", "content": content})
+    result = _call_json(CONFIGURE_SYSTEM, history)
+    history.append({"role": "assistant", "content": json.dumps(result)})
+    return result
+
+
+def summarize_configure_step(step: dict, output: str, history: list) -> str:
+    """Summarise the output of a configuration step."""
+    content = (
+        f"Configuration step '{step.get('title')}' executed.\n"
+        f"Commands: {step.get('commands')}\n"
+        f"Output:\n{output[:3000]}"
+    )
+    history.append({"role": "user", "content": content})
+    system = (
+        "You are a Linux configuration AI. "
+        "Briefly summarise the configuration step output (2-4 sentences) and indicate if it succeeded."
     )
     result = _call(system, history)
     history.append({"role": "assistant", "content": result})

@@ -137,6 +137,12 @@ pre,code{font-family:ui-monospace,SFMono-Regular,monospace}
   border-radius:4px;margin-top:0.5rem}
 .verify-btn{background:var(--blue);color:#fff;padding:6px 18px;font-weight:700;
   border-radius:4px;margin-top:0.5rem}
+.confirm-row{display:flex;gap:8px;align-items:center;margin-top:4px;padding:6px 0}
+.confirm-yes{background:var(--green);color:#000;padding:3px 14px;font-size:12px;font-weight:700;border-radius:3px}
+.confirm-no{background:#3a1b1b;color:var(--red);padding:3px 14px;font-size:12px;font-weight:700;border-radius:3px}
+.action-proposal-btns{display:flex;gap:8px;margin-top:0.75rem}
+.proceed-btn{background:var(--green);color:#000;padding:6px 20px;font-weight:700;border-radius:4px}
+.cancel-btn{background:transparent;color:var(--muted);border:1px solid var(--border);padding:6px 14px;border-radius:4px}
 
 /* ── jobs ─────────────────────────────────────────────────────────────────── */
 .filter-row{display:flex;gap:0.75rem;margin-bottom:1rem;align-items:flex-end;flex-wrap:wrap}
@@ -772,7 +778,9 @@ document.getElementById('chat-clear').onclick = async function(){
   if(!chatInstanceId)return;
   if(!confirm('Clear all chat history for this instance?'))return;
   await api(`/api/chat_history/${chatInstanceId}`,{method:'DELETE'});
+  await api(`/api/chat/reset/${chatInstanceId}`,{method:'POST'});
   document.getElementById('chat-messages').innerHTML='';
+  chatJobId=null; chatPlan=null; chatMode=null;
 };
 
 function appendMsg(type, html, preText=null, persist=true){
@@ -832,33 +840,70 @@ async function sendChat(isReplicate=false, srcId=null, tgtId=null){
   inp.value='';
   appendMsg('user', esc(msg));
 
-  // Reset state for new conversation
-  chatJobId=null; chatPlan=null; chatMode=null;
-
-  appendMsg('system','<span class="spinner"></span> Classifying intent…');
-
   if(isReplicate){
-    // Direct replicate flow
+    chatJobId=null; chatPlan=null; chatMode=null;
     await startReplicate(srcId, iid, msg);
     return;
   }
 
-  // Classify
-  const cls = await api('/api/classify',{method:'POST',body:JSON.stringify({message:msg})});
-  chatMode = cls.data?.intent||'troubleshoot';
-  // Remove spinner msg
+  // Send to conversational AI — it asks questions or proposes an action
+  appendMsg('system','<span class="spinner"></span> Thinking…',null,false);
+  const res = await api('/api/chat/message',{method:'POST',
+    body:JSON.stringify({instance_id:iid,message:msg})});
   const msgs = document.getElementById('chat-messages');
-  msgs.removeChild(msgs.lastChild);
+  msgs.removeChild(msgs.lastChild);  // remove spinner
 
-  appendMsg('system',`Intent: <strong style="color:var(--accent)">${chatMode}</strong>`);
+  if(!res.ok){appendMsg('system','Error: '+esc(res.error));return;}
 
-  if(chatMode==='troubleshoot'){
-    await startTroubleshoot(iid, msg);
-  } else if(chatMode==='explore'){
-    await startExplore(iid, msg);
+  const data = res.data;
+  if(data.type==='action_proposal'){
+    renderActionProposal(data, iid);
   } else {
-    await startBuild(iid, msg);
+    appendMsg('ai', esc(data.reply||''));
   }
+}
+
+function renderActionProposal(data, iid){
+  const intent = data.action?.intent||'';
+  const intentColors = {
+    troubleshoot:'var(--yellow)', build:'var(--blue)',
+    configure:'var(--magenta)', explore:'var(--green)'
+  };
+  const color = intentColors[intent]||'var(--accent)';
+  let html = `<div class="plan-card">
+    <p style="margin-bottom:0.75rem">${esc(data.reply||'')}</p>
+    <p style="font-size:12px;color:${color};margin-bottom:0.75rem">
+      Action: <strong>${esc(intent.toUpperCase())}</strong>
+      ${data.action?.summary?' — '+esc(data.action.summary):''}
+    </p>
+    <div class="action-proposal-btns">
+      <button class="proceed-btn" id="proposal-proceed">Proceed ✓</button>
+      <button class="cancel-btn" id="proposal-cancel">Cancel</button>
+    </div>
+  </div>`;
+  appendMsg('ai', html, null, false);  // don't auto-persist with buttons
+
+  // Wire up the buttons (they only exist in the last AI message)
+  const container = document.getElementById('chat-messages');
+  const lastMsg = container.lastChild;
+  lastMsg.querySelector('#proposal-proceed').onclick = async ()=>{
+    lastMsg.querySelector('.action-proposal-btns').innerHTML =
+      `<span style="color:var(--green);font-size:12px">✓ Proceeding with ${esc(intent)}…</span>`;
+    // Save the AI proposal message now (without interactive buttons)
+    saveChatMsg(iid,'ai',`<em>Action proposed:</em> ${esc(intent)} — ${esc(data.action?.summary||'')}. <em>User confirmed.</em>`);
+    chatJobId=null; chatPlan=null; chatMode=intent;
+    if(intent==='troubleshoot') await startTroubleshoot(iid, data.action?.summary||'');
+    else if(intent==='build') await startBuild(iid, data.action?.summary||'');
+    else if(intent==='configure') await startConfigure(iid, data.action?.summary||'');
+    else await startExplore(iid, data.action?.summary||'');
+  };
+  lastMsg.querySelector('#proposal-cancel').onclick = ()=>{
+    lastMsg.querySelector('.action-proposal-btns').innerHTML =
+      `<span style="color:var(--muted);font-size:12px">Cancelled.</span>`;
+    saveChatMsg(iid,'ai',`<em>Action proposed:</em> ${esc(intent)} — <em>Cancelled by user.</em>`);
+    // Reset LLM context so AI starts fresh
+    api(`/api/chat/reset/${iid}`,{method:'POST'});
+  };
 }
 
 async function startExplore(iid, msg){
@@ -942,17 +987,35 @@ function renderTroubleshootPlan(plan, jobId){
 }
 
 async function execStep(jobId, stepId, btn){
-  btn.disabled=true; btn.textContent='Running…';
-  const res = await api('/api/execute_step',{method:'POST',body:JSON.stringify({job_id:parseInt(jobId),step_id:stepId})});
-  btn.textContent='Done';
-  const outEl = document.getElementById(`step-out-${jobId}-${stepId}`);
-  outEl.style.display='';
-  if(res.ok){
-    outEl.innerHTML=`<div class="step-output">${esc(res.data.output)}</div>
-      <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(res.data.summary)}</div>`;
-  } else {
-    outEl.innerHTML=`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
-  }
+  // Ask for inline confirmation first
+  const row = btn.parentElement;
+  const confirmRow = document.createElement('div');
+  confirmRow.className='confirm-row';
+  confirmRow.innerHTML=`<span style="font-size:12px;color:var(--yellow)">⚠ Run this step?</span>
+    <button class="confirm-yes">Yes, Run</button>
+    <button class="confirm-no">Cancel</button>`;
+  row.insertAdjacentElement('afterend', confirmRow);
+  btn.disabled=true;
+
+  await new Promise(resolve=>{
+    confirmRow.querySelector('.confirm-yes').onclick = async ()=>{
+      confirmRow.remove(); btn.textContent='Running…';
+      const res = await api('/api/execute_step',{method:'POST',body:JSON.stringify({job_id:parseInt(jobId),step_id:stepId})});
+      btn.textContent='Done';
+      const outEl = document.getElementById(`step-out-${jobId}-${stepId}`);
+      outEl.style.display='';
+      if(res.ok){
+        outEl.innerHTML=`<div class="step-output">${esc(res.data.output)}</div>
+          <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(res.data.summary)}</div>`;
+      } else {
+        outEl.innerHTML=`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
+      }
+      resolve();
+    };
+    confirmRow.querySelector('.confirm-no').onclick = ()=>{
+      confirmRow.remove(); btn.disabled=false; resolve();
+    };
+  });
 }
 
 async function runVerify(jobId){
@@ -1014,18 +1077,35 @@ function renderBuildPlan(plan, jobId){
 }
 
 async function execBuildStep(jobId, phaseId, stepId, btn){
-  btn.disabled=true; btn.textContent='Running…';
-  const res = await api('/api/build/execute_step',{method:'POST',
-    body:JSON.stringify({job_id:parseInt(jobId),phase_id:phaseId,step_id:stepId})});
-  btn.textContent='Done';
-  const outEl = document.getElementById(`bstep-out-${jobId}-${phaseId}-${stepId}`);
-  outEl.style.display='';
-  if(res.ok){
-    outEl.innerHTML=`<div class="step-output">${esc(res.data.output)}</div>
-      <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(res.data.summary)}</div>`;
-  } else {
-    outEl.innerHTML=`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
-  }
+  const row = btn.parentElement;
+  const confirmRow = document.createElement('div');
+  confirmRow.className='confirm-row';
+  confirmRow.innerHTML=`<span style="font-size:12px;color:var(--yellow)">⚠ Run this step?</span>
+    <button class="confirm-yes">Yes, Run</button>
+    <button class="confirm-no">Cancel</button>`;
+  row.insertAdjacentElement('afterend', confirmRow);
+  btn.disabled=true;
+
+  await new Promise(resolve=>{
+    confirmRow.querySelector('.confirm-yes').onclick = async ()=>{
+      confirmRow.remove(); btn.textContent='Running…';
+      const res = await api('/api/build/execute_step',{method:'POST',
+        body:JSON.stringify({job_id:parseInt(jobId),phase_id:phaseId,step_id:stepId})});
+      btn.textContent='Done';
+      const outEl = document.getElementById(`bstep-out-${jobId}-${phaseId}-${stepId}`);
+      outEl.style.display='';
+      if(res.ok){
+        outEl.innerHTML=`<div class="step-output">${esc(res.data.output)}</div>
+          <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(res.data.summary)}</div>`;
+      } else {
+        outEl.innerHTML=`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
+      }
+      resolve();
+    };
+    confirmRow.querySelector('.confirm-no').onclick = ()=>{
+      confirmRow.remove(); btn.disabled=false; resolve();
+    };
+  });
 }
 
 async function runPostInstall(jobId){
@@ -1037,6 +1117,86 @@ async function runPostInstall(jobId){
     appendMsg('ai',`<strong>Post-Install Summary</strong><br>${esc(res.data.summary)}`);
   } else {
     appendMsg('system','Post-install error: '+esc(res.error));
+  }
+}
+
+async function startConfigure(iid, msg){
+  appendMsg('system','<span class="spinner"></span> Collecting diagnostics for configuration…');
+  const res = await api('/api/configure/plan',{method:'POST',body:JSON.stringify({instance_id:iid,message:msg})});
+  const msgs = document.getElementById('chat-messages');
+  msgs.removeChild(msgs.lastChild);
+
+  if(!res.ok){appendMsg('system','Error: '+esc(res.error));return;}
+  chatJobId = res.data.job_id;
+  chatPlan = res.data.plan;
+  renderConfigurePlan(chatPlan, chatJobId);
+}
+
+function renderConfigurePlan(plan, jobId){
+  const riskLevel = plan.risk_level||'low';
+  const riskColor = riskLevel==='high'?'var(--red)':riskLevel==='medium'?'var(--yellow)':'var(--green)';
+  let html = `<div class="plan-card">
+    <h4 style="color:var(--magenta)">Configuration Plan</h4>
+    <p style="margin-bottom:0.5rem">${esc(plan.intent||'')}</p>
+    <p style="font-size:12px;color:${riskColor};margin-bottom:0.75rem">Risk: ${esc(riskLevel.toUpperCase())}</p>
+    <h4 style="margin-top:0.75rem">Steps</h4>`;
+
+  (plan.steps||[]).forEach(step=>{
+    html+=`<div class="step-row" id="cfgstep-${jobId}-${step.id}">
+      <span class="step-title">${esc(step.title)}</span>
+      ${step.risky?'<span class="risky-badge">RISKY</span>':''}
+      <button class="step-exec-btn" onclick="execConfigureStep('${jobId}','${step.id}',this)">Run</button>
+    </div>
+    <div id="cfgstep-out-${jobId}-${step.id}" style="display:none"></div>`;
+  });
+
+  html+=`<div style="margin-top:0.75rem">
+    <button class="verify-btn" onclick="runConfigureVerify('${jobId}')">Verify Configuration</button>
+  </div></div>`;
+  appendMsg('ai', html);
+}
+
+async function execConfigureStep(jobId, stepId, btn){
+  const row = btn.parentElement;
+  const confirmRow = document.createElement('div');
+  confirmRow.className='confirm-row';
+  confirmRow.innerHTML=`<span style="font-size:12px;color:var(--yellow)">⚠ Apply this configuration change?</span>
+    <button class="confirm-yes">Yes, Apply</button>
+    <button class="confirm-no">Cancel</button>`;
+  row.insertAdjacentElement('afterend', confirmRow);
+  btn.disabled=true;
+
+  await new Promise(resolve=>{
+    confirmRow.querySelector('.confirm-yes').onclick = async ()=>{
+      confirmRow.remove(); btn.textContent='Running…';
+      const res = await api('/api/configure/execute_step',{method:'POST',
+        body:JSON.stringify({job_id:parseInt(jobId),step_id:stepId})});
+      btn.textContent='Done';
+      const outEl = document.getElementById(`cfgstep-out-${jobId}-${stepId}`);
+      outEl.style.display='';
+      if(res.ok){
+        outEl.innerHTML=`<div class="step-output">${esc(res.data.output)}</div>
+          <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(res.data.summary)}</div>`;
+      } else {
+        outEl.innerHTML=`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
+      }
+      resolve();
+    };
+    confirmRow.querySelector('.confirm-no').onclick = ()=>{
+      confirmRow.remove(); btn.disabled=false; resolve();
+    };
+  });
+}
+
+async function runConfigureVerify(jobId){
+  appendMsg('system','<span class="spinner"></span> Verifying configuration…');
+  const res = await api('/api/configure/verify',{method:'POST',body:JSON.stringify({job_id:parseInt(jobId)})});
+  const msgs = document.getElementById('chat-messages');
+  msgs.removeChild(msgs.lastChild);
+  if(res.ok){
+    appendMsg('ai',`<strong>Verification</strong><br>${esc(res.data.summary)}`, res.data.output);
+  } else {
+    appendMsg('system','Verification error: '+esc(res.error));
   }
 }
 

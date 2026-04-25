@@ -34,6 +34,11 @@ app = Flask(__name__, template_folder=TEMPLATES_DIR)
 sessions: dict = {}
 sessions_lock = threading.Lock()
 
+# ── per-instance conversational state ────────────────────────────────────────
+# {instance_id: [openai message dicts]}  — LLM context for the chat conversation
+instance_conversations: dict = {}
+instance_conversations_lock = threading.Lock()
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -819,6 +824,146 @@ def explore_cmd():
     summary = core.run_explore_command(title, cmd, combined, session["history"])
 
     return _ok({"output": combined, "success": success, "summary": summary})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Conversational chat
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route("/api/chat/message", methods=["POST"])
+def chat_message():
+    """
+    Conversational turn endpoint. Maintains per-instance LLM history so the AI
+    can ask clarifying questions and propose actions with confirmation.
+    Returns {type: 'reply'|'action_proposal', reply, action?}.
+    """
+    body = request.json or {}
+    iid = body.get("instance_id")
+    message = body.get("message", "")
+    if not iid or not message:
+        return _err("instance_id and message required")
+
+    inst, err = _require_instance(iid)
+    if err:
+        return err
+
+    with instance_conversations_lock:
+        history = instance_conversations.setdefault(int(iid), [])
+
+    try:
+        result = core.chat_reply(message, inst["label"], history)
+    except Exception as exc:
+        return _err(f"AI error: {exc}")
+
+    return _ok(result)
+
+
+@app.route("/api/chat/reset/<int:instance_id>", methods=["POST"])
+def chat_reset_conversation(instance_id):
+    """Reset the in-memory LLM conversation context for an instance."""
+    with instance_conversations_lock:
+        instance_conversations.pop(instance_id, None)
+    return _ok()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Configure
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route("/api/configure/plan", methods=["POST"])
+def configure_plan():
+    body = request.json or {}
+    iid = body.get("instance_id")
+    message = body.get("message", "")
+    if not iid or not message:
+        return _err("instance_id and message required")
+
+    inst, err = _require_instance(iid)
+    if err:
+        return err
+
+    try:
+        diag = _ssh.collect_diagnostics(inst)
+    except Exception as exc:
+        return _err(f"SSH error: {exc}")
+
+    history: list = []
+    plan = core.generate_configure_plan(diag, message, history)
+
+    job_id = db.create_job(iid, "configure", message[:120], plan_json=plan)
+    with sessions_lock:
+        sessions[job_id] = {
+            "plan": plan,
+            "history": history,
+            "instance_id": iid,
+            "type": "configure",
+        }
+    return _ok({"job_id": job_id, "plan": plan})
+
+
+@app.route("/api/configure/execute_step", methods=["POST"])
+def configure_execute_step():
+    body = request.json or {}
+    job_id = body.get("job_id")
+    step_id = body.get("step_id")
+    if not job_id or not step_id:
+        return _err("job_id and step_id required")
+
+    with sessions_lock:
+        session = sessions.get(int(job_id))
+    if not session:
+        return _err("Session not found — job may have expired")
+
+    plan = session["plan"]
+    steps = plan.get("steps", [])
+    step = next((s for s in steps if str(s.get("id")) == str(step_id)), None)
+    if not step:
+        return _err("Step not found")
+
+    inst = db.get_instance(session["instance_id"])
+    if not inst:
+        return _err("Instance not found")
+
+    cmds = step.get("commands", [])
+    results = _ssh.run_commands(inst, cmds, timeout=300)
+    combined = "\n".join(
+        f"$ {r['command']}\n{r['stdout']}{r['stderr']}"
+        for r in results
+    )
+    success = all(r["success"] for r in results)
+    summary = core.summarize_configure_step(step, combined, session["history"])
+    db.add_job_step(int(job_id), None, step_id, step.get("title", ""), cmds, combined, success)
+
+    return _ok({"output": combined, "success": success, "summary": summary})
+
+
+@app.route("/api/configure/verify", methods=["POST"])
+def configure_verify():
+    body = request.json or {}
+    job_id = body.get("job_id")
+    if not job_id:
+        return _err("job_id required")
+
+    with sessions_lock:
+        session = sessions.get(int(job_id))
+    if not session:
+        return _err("Session not found")
+
+    plan = session["plan"]
+    verification_cmd = plan.get("verification", "")
+    if not verification_cmd:
+        return _ok({"output": "", "summary": "No verification command defined."})
+
+    inst = db.get_instance(session["instance_id"])
+    if not inst:
+        return _err("Instance not found")
+
+    stdout, stderr, code = _ssh.run_command(inst, verification_cmd, timeout=60)
+    output = stdout + stderr
+    summary = core.run_verification_summary(verification_cmd, output, session["history"])
+    db.finish_job(int(job_id), "done", result=summary)
+
+    return _ok({"output": output, "summary": summary, "success": code == 0})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
