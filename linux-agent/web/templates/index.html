@@ -114,6 +114,9 @@ pre,code{font-family:ui-monospace,SFMono-Regular,monospace}
 #chat-input-row{display:flex;gap:8px;margin-top:0.75rem}
 #chat-input{flex:1;resize:none;height:60px;font-family:inherit}
 #chat-send{background:var(--accent);color:#000;padding:0 20px;font-weight:700;border-radius:4px}
+#chat-clear{background:transparent;color:var(--muted);border:1px solid var(--border);padding:0 12px;font-size:12px;border-radius:4px}
+#chat-clear:hover{color:var(--red);border-color:var(--red)}
+.msg-history{opacity:0.72}
 .plan-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;
   padding:1rem;margin-top:0.5rem}
 .plan-card h4{color:var(--accent);margin-bottom:0.5rem}
@@ -265,6 +268,7 @@ h2.section-title{color:var(--accent)}
     <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem">
       <span style="font-size:13px;color:var(--muted)">Instance:</span>
       <select id="chat-instance-select" style="width:200px"></select>
+      <button id="chat-clear">Clear History</button>
     </div>
     <div id="chat-container">
       <div id="chat-messages"></div>
@@ -456,6 +460,7 @@ let activeTab = 'dashboard';
 let chatJobId = null;
 let chatPlan = null;
 let chatMode = null; // 'troubleshoot'|'build'
+let chatInstanceId = null; // currently active instance for chat
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Utils
@@ -507,6 +512,10 @@ document.querySelectorAll('.nav-tab').forEach(btn=>{
     else if(activeTab==='jobs')loadJobs();
     else if(activeTab==='studies')loadStudies();
     else if(activeTab==='alerts'){loadNotifyConfig();loadSchedulerJobs();}
+    else if(activeTab==='chat'){
+      const iid=parseInt(document.getElementById('chat-instance-select').value)||null;
+      if(iid&&iid!==chatInstanceId){chatInstanceId=iid;loadChatHistory(iid);}
+    }
   });
 });
 
@@ -721,7 +730,11 @@ async function loadDashboard(){
 function openChatFor(id){
   selectInstance(id);
   showTab('chat');
-  document.getElementById('chat-instance-select').value=id;
+  const sel = document.getElementById('chat-instance-select');
+  sel.value=id;
+  chatInstanceId=id;
+  chatJobId=null; chatPlan=null; chatMode=null;
+  loadChatHistory(id);
 }
 
 async function viewLatestReport(id){
@@ -750,8 +763,19 @@ document.getElementById('chat-send').onclick = ()=>sendChat();
 document.getElementById('chat-input').addEventListener('keydown', e=>{
   if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat();}
 });
+document.getElementById('chat-instance-select').addEventListener('change', async function(){
+  chatInstanceId = parseInt(this.value)||null;
+  chatJobId=null; chatPlan=null; chatMode=null;
+  await loadChatHistory(chatInstanceId);
+});
+document.getElementById('chat-clear').onclick = async function(){
+  if(!chatInstanceId)return;
+  if(!confirm('Clear all chat history for this instance?'))return;
+  await api(`/api/chat_history/${chatInstanceId}`,{method:'DELETE'});
+  document.getElementById('chat-messages').innerHTML='';
+};
 
-function appendMsg(type, html, preText=null){
+function appendMsg(type, html, preText=null, persist=true){
   const el = document.getElementById('chat-messages');
   const div = document.createElement('div');
   div.className=`msg msg-${type}`;
@@ -764,12 +788,43 @@ function appendMsg(type, html, preText=null){
   }
   el.appendChild(div);
   el.scrollTop=el.scrollHeight;
+  if(persist && chatInstanceId && !html.includes('spinner')){
+    saveChatMsg(chatInstanceId, type, html, preText||null);
+  }
+}
+
+async function saveChatMsg(iid, role, content, preText=null){
+  try{
+    await api(`/api/chat_history/${iid}`,{method:'POST',body:JSON.stringify({role,content,pre_text:preText})});
+  }catch(e){}
+}
+
+async function loadChatHistory(iid){
+  const el = document.getElementById('chat-messages');
+  el.innerHTML='';
+  if(!iid)return;
+  const res = await api(`/api/chat_history/${iid}`);
+  if(!res.ok||!res.data?.length)return;
+  res.data.forEach(m=>{
+    const div=document.createElement('div');
+    div.className=`msg msg-${m.role} msg-history`;
+    div.innerHTML=m.content;
+    if(m.pre_text){
+      const pre=document.createElement('pre');
+      pre.className='msg-pre';
+      pre.textContent=m.pre_text;
+      div.appendChild(pre);
+    }
+    el.appendChild(div);
+  });
+  el.scrollTop=el.scrollHeight;
 }
 
 async function sendChat(isReplicate=false, srcId=null, tgtId=null){
   const instSel = document.getElementById('chat-instance-select');
   const iid = parseInt(isReplicate ? tgtId : instSel.value);
-  if(!iid){appendMsg('system','Please select an instance.');return;}
+  if(!iid){appendMsg('system','Please select an instance.',null,false);return;}
+  chatInstanceId = iid;
 
   const inp = document.getElementById('chat-input');
   const msg = inp.value.trim();

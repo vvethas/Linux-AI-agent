@@ -106,6 +106,15 @@ CREATE TABLE IF NOT EXISTS config (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS chat_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id INTEGER NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+    role        TEXT NOT NULL,   -- 'user' | 'ai' | 'system'
+    content     TEXT NOT NULL,   -- HTML or plain text
+    pre_text    TEXT,            -- optional <pre> block text
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
@@ -387,6 +396,35 @@ def append_check_log(instance_id: int, entry: dict, max_entries=50):
     log.insert(0, entry)
     log = log[:max_entries]
     set_config(f"check_log_{instance_id}", json.dumps(log))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Chat history helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_chat_message(instance_id: int, role: str, content: str, pre_text: str = None):
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO chat_history (instance_id, role, content, pre_text)
+               VALUES (?, ?, ?, ?)""",
+            (instance_id, role, content, pre_text),
+        )
+
+
+def get_chat_history(instance_id: int, limit: int = 200):
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT id, role, content, pre_text, created_at
+               FROM chat_history WHERE instance_id=?
+               ORDER BY id ASC LIMIT ?""",
+            (instance_id, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def clear_chat_history(instance_id: int):
+    with get_db() as conn:
+        conn.execute("DELETE FROM chat_history WHERE instance_id=?", (instance_id,))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

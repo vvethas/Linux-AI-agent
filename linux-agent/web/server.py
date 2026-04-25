@@ -821,6 +821,44 @@ def explore_cmd():
     return _ok({"output": combined, "success": success, "summary": summary})
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Chat history
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route("/api/chat_history/<int:instance_id>", methods=["GET"])
+def get_chat_history(instance_id):
+    inst, err = _require_instance(instance_id)
+    if err:
+        return err
+    limit = int(request.args.get("limit", 200))
+    messages = db.get_chat_history(instance_id, limit=limit)
+    return _ok(messages)
+
+
+@app.route("/api/chat_history/<int:instance_id>", methods=["POST"])
+def save_chat_message(instance_id):
+    inst, err = _require_instance(instance_id)
+    if err:
+        return err
+    body = request.json or {}
+    role = body.get("role", "")
+    content = body.get("content", "")
+    pre_text = body.get("pre_text") or None
+    if role not in ("user", "ai", "system"):
+        return _err("role must be user, ai, or system")
+    if not content:
+        return _err("content required")
+    db.save_chat_message(instance_id, role, content, pre_text)
+    return _ok()
+
+
+@app.route("/api/chat_history/<int:instance_id>", methods=["DELETE"])
+def clear_chat_history(instance_id):
+    inst, err = _require_instance(instance_id)
+    if err:
+        return err
+    db.clear_chat_history(instance_id)
+    return _ok()
 
 
 @app.route("/api/scheduler/jobs", methods=["GET"])
