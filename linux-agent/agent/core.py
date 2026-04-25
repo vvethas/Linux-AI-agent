@@ -60,13 +60,17 @@ def _call_json(system: str, messages: list) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 CLASSIFY_SYSTEM = (
-    "Classify the user's message as either troubleshoot or build. "
-    "Reply with exactly one word: troubleshoot or build."
+    "Classify the user's message into exactly one of these three categories:\n"
+    "  troubleshoot — the user is reporting a problem, error, or failure that needs fixing.\n"
+    "  build        — the user wants to deploy, install, or set up new infrastructure.\n"
+    "  explore      — the user wants to inspect, query, or learn about the current state of the "
+    "instance (e.g. list services, check what is running, show logs, answer a question about the system).\n"
+    "Reply with exactly one word: troubleshoot, build, or explore."
 )
 
 
 def classify_intent(user_message: str) -> str:
-    """Returns 'troubleshoot' or 'build'."""
+    """Returns 'troubleshoot', 'build', or 'explore'."""
     result = _call(
         CLASSIFY_SYSTEM,
         [{"role": "user", "content": user_message}],
@@ -74,6 +78,8 @@ def classify_intent(user_message: str) -> str:
     result = result.strip().lower()
     if "build" in result:
         return "build"
+    if "explore" in result:
+        return "explore"
     return "troubleshoot"
 
 
@@ -233,6 +239,57 @@ def collect_post_install(post_install: dict, outputs: list, history: list) -> st
     system = (
         "You are a Linux infrastructure automation AI. "
         "Summarise the post-install results, list discovered credentials and endpoints."
+    )
+    result = _call(system, history)
+    history.append({"role": "assistant", "content": result})
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature 4 — Explore / chat mode
+# ─────────────────────────────────────────────────────────────────────────────
+
+EXPLORE_SYSTEM = """You are a Linux systems assistant. \
+The user wants to inspect or learn about the current state of a Linux instance. \
+You are given basic diagnostics and the user's question. \
+Return ONLY valid JSON (no markdown fences):
+{
+  "answer": "<conversational answer to the user's question>",
+  "commands": [
+    {"title": "<short label>", "cmd": "<shell command>"}
+  ]
+}
+The "commands" array should contain read-only shell commands that would give the user \
+the information they asked for (e.g. list services, show logs, check disk). \
+Keep commands safe and non-destructive. \
+If no additional commands are needed, return an empty array."""
+
+
+def generate_explore_response(diagnostics: dict, user_question: str, history: list) -> dict:
+    """
+    Answer the user's question about the instance state.
+    Returns parsed JSON with 'answer' and optional 'commands' to run.
+    """
+    content = (
+        f"User question: {user_question}\n\n"
+        f"Basic diagnostics from the instance:\n{json.dumps(diagnostics, indent=2)}"
+    )
+    history.append({"role": "user", "content": content})
+    result = _call_json(EXPLORE_SYSTEM, history)
+    history.append({"role": "assistant", "content": json.dumps(result)})
+    return result
+
+
+def run_explore_command(title: str, cmd: str, output: str, history: list) -> str:
+    """Summarise the output of an explore command."""
+    content = (
+        f"Command '{title}' (`{cmd}`) executed.\n"
+        f"Output:\n{output[:3000]}"
+    )
+    history.append({"role": "user", "content": content})
+    system = (
+        "You are a Linux systems assistant. "
+        "Briefly summarise the command output in 2-4 sentences for a human reader."
     )
     result = _call(system, history)
     history.append({"role": "assistant", "content": result})

@@ -799,8 +799,54 @@ async function sendChat(isReplicate=false, srcId=null, tgtId=null){
 
   if(chatMode==='troubleshoot'){
     await startTroubleshoot(iid, msg);
+  } else if(chatMode==='explore'){
+    await startExplore(iid, msg);
   } else {
     await startBuild(iid, msg);
+  }
+}
+
+async function startExplore(iid, msg){
+  appendMsg('system','<span class="spinner"></span> Collecting instance info…');
+  const res = await api('/api/explore',{method:'POST',body:JSON.stringify({instance_id:iid,message:msg})});
+  const msgs = document.getElementById('chat-messages');
+  msgs.removeChild(msgs.lastChild);
+
+  if(!res.ok){appendMsg('system','Error: '+esc(res.error));return;}
+  chatJobId = res.data.job_id;
+  chatPlan = res.data.response;
+  renderExploreResponse(chatPlan, chatJobId);
+}
+
+function renderExploreResponse(resp, jobId){
+  const cmds = resp.commands||[];
+  let html=`<div class="plan-card">
+    <p style="margin-bottom:0.75rem">${esc(resp.answer||'')}</p>`;
+  if(cmds.length){
+    html+=`<h4 style="margin-bottom:0.5rem">Suggested Commands</h4>`;
+    cmds.forEach((c,i)=>{
+      html+=`<div class="step-row" id="ecmd-${jobId}-${i}">
+        <span class="step-title">${esc(c.title)}</span>
+        <button class="step-exec-btn" onclick="runExploreCmd('${jobId}',${i},${JSON.stringify(c.title)},${JSON.stringify(c.cmd)},this)">Run</button>
+      </div>
+      <div id="ecmd-out-${jobId}-${i}" style="display:none"></div>`;
+    });
+  }
+  html+=`</div>`;
+  appendMsg('ai', html);
+}
+
+async function runExploreCmd(jobId, idx, title, cmd, btn){
+  btn.disabled=true; btn.textContent='Running…';
+  const res = await api('/api/explore_cmd',{method:'POST',body:JSON.stringify({job_id:parseInt(jobId),title,cmd})});
+  btn.textContent='Done';
+  const outEl = document.getElementById(`ecmd-out-${jobId}-${idx}`);
+  outEl.style.display='';
+  if(res.ok){
+    outEl.innerHTML=`<div class="step-output">${esc(res.data.output)}</div>
+      <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(res.data.summary)}</div>`;
+  } else {
+    outEl.innerHTML=`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
   }
 }
 

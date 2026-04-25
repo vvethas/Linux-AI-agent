@@ -758,8 +758,70 @@ def upload_key():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Scheduler jobs
+# Explore / chat mode
 # ─────────────────────────────────────────────────────────────────────────────
+
+@app.route("/api/explore", methods=["POST"])
+def explore():
+    body = request.json or {}
+    iid = body.get("instance_id")
+    message = body.get("message", "")
+    if not iid or not message:
+        return _err("instance_id and message required")
+
+    inst, err = _require_instance(iid)
+    if err:
+        return err
+
+    try:
+        diag = _ssh.collect_diagnostics(inst)
+    except Exception as exc:
+        return _err(f"SSH error: {exc}")
+
+    history: list = []
+    response = core.generate_explore_response(diag, message, history)
+
+    job_id = db.create_job(iid, "explore", message[:120], plan_json=response)
+    with sessions_lock:
+        sessions[job_id] = {
+            "plan": response,
+            "history": history,
+            "instance_id": iid,
+            "type": "explore",
+        }
+    return _ok({"job_id": job_id, "response": response})
+
+
+@app.route("/api/explore_cmd", methods=["POST"])
+def explore_cmd():
+    body = request.json or {}
+    job_id = body.get("job_id")
+    title = body.get("title", "")
+    cmd = body.get("cmd", "")
+    if not job_id or not cmd:
+        return _err("job_id and cmd required")
+
+    with sessions_lock:
+        session = sessions.get(int(job_id))
+    if not session:
+        return _err("Session not found — job may have expired")
+
+    inst = db.get_instance(session["instance_id"])
+    if not inst:
+        return _err("Instance not found")
+
+    results = _ssh.run_commands(inst, [cmd], timeout=60)
+    combined = "\n".join(
+        f"$ {r['command']}\n{r['stdout']}{r['stderr']}"
+        for r in results
+    )
+    success = all(r["success"] for r in results)
+    summary = core.run_explore_command(title, cmd, combined, session["history"])
+
+    return _ok({"output": combined, "success": success, "summary": summary})
+
+
+
 
 @app.route("/api/scheduler/jobs", methods=["GET"])
 def scheduler_jobs():

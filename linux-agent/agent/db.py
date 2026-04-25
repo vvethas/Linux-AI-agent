@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS instances (
 CREATE TABLE IF NOT EXISTS jobs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     instance_id  INTEGER REFERENCES instances(id) ON DELETE CASCADE,
-    type         TEXT NOT NULL,   -- troubleshoot|build|study|replicate
+    type         TEXT NOT NULL,   -- troubleshoot|build|explore|study|replicate
     title        TEXT NOT NULL,
     status       TEXT NOT NULL DEFAULT 'pending', -- pending|running|done|failed
     plan_json    TEXT,
