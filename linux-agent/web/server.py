@@ -835,11 +835,23 @@ def chat_message():
     """
     Conversational turn endpoint. Maintains per-instance LLM history so the AI
     can ask clarifying questions and propose actions with confirmation.
+    Accepts application/json or multipart/form-data (when an attachment is included).
     Returns {type: 'reply'|'action_proposal', reply, action?}.
     """
-    body = request.json or {}
-    iid = body.get("instance_id")
-    message = body.get("message", "")
+    content_type = request.content_type or ""
+    if content_type.startswith("multipart/form-data"):
+        iid = request.form.get("instance_id")
+        message = request.form.get("message", "")
+        attach_name = request.form.get("attach_name", "")
+        attach_mime = request.form.get("attach_mime", "")
+        attach_data = request.form.get("attach_data", "")  # base64 string
+        attachment = {"name": attach_name, "mime": attach_mime, "data": attach_data} if attach_data else None
+    else:
+        body = request.json or {}
+        iid = body.get("instance_id")
+        message = body.get("message", "")
+        attachment = None
+
     if not iid or not message:
         return _err("instance_id and message required")
 
@@ -851,7 +863,7 @@ def chat_message():
         history = instance_conversations.setdefault(int(iid), [])
 
     try:
-        result = core.chat_reply(message, inst["label"], history)
+        result = core.chat_reply(message, inst["label"], history, attachment=attachment)
     except Exception as exc:
         return _err(f"AI error: {exc}")
 

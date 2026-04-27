@@ -111,11 +111,20 @@ pre,code{font-family:ui-monospace,SFMono-Regular,monospace}
 .msg-pre{background:#0d0d0d;border:1px solid var(--border);border-radius:4px;
   padding:8px;margin-top:6px;overflow-x:auto;font-size:12px;white-space:pre-wrap;
   color:var(--accent)}
-#chat-input-row{display:flex;gap:8px;margin-top:0.75rem}
+#chat-input-row{display:flex;gap:8px;margin-top:0.75rem;align-items:flex-end}
 #chat-input{flex:1;resize:none;height:60px;font-family:inherit}
-#chat-send{background:var(--accent);color:#000;padding:0 20px;font-weight:700;border-radius:4px}
+#chat-send{background:var(--accent);color:#000;padding:0 20px;font-weight:700;border-radius:4px;height:60px}
 #chat-clear{background:transparent;color:var(--muted);border:1px solid var(--border);padding:0 12px;font-size:12px;border-radius:4px}
 #chat-clear:hover{color:var(--red);border-color:var(--red)}
+#chat-attach-btn{display:flex;align-items:center;justify-content:center;width:38px;height:60px;
+  background:transparent;border:1px solid var(--border);border-radius:4px;cursor:pointer;
+  font-size:18px;color:var(--muted);flex-shrink:0}
+#chat-attach-btn:hover{border-color:var(--accent);color:var(--accent)}
+#attach-preview{display:flex;align-items:center;gap:6px;padding:4px 8px;
+  background:var(--surface);border:1px solid var(--border);border-radius:4px;
+  font-size:12px;color:var(--accent);margin-top:6px}
+#attach-preview img{max-height:48px;max-width:80px;border-radius:3px;object-fit:cover}
+.attach-remove{background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;padding:0 2px;line-height:1}
 .msg-history{opacity:0.72}
 .plan-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;
   padding:1rem;margin-top:0.5rem}
@@ -278,7 +287,14 @@ h2.section-title{color:var(--accent)}
     </div>
     <div id="chat-container">
       <div id="chat-messages"></div>
+      <div id="attach-preview" style="display:none"></div>
       <div id="chat-input-row">
+        <label id="chat-attach-btn" title="Attach image or text file">
+          📎
+          <input type="file" id="chat-attach-input" style="display:none"
+            accept="image/png,image/jpeg,image/gif,image/webp,.txt,.log,.conf,.yaml,.yml,.json,.md,.sh"
+            onchange="handleAttachSelect(this)"/>
+        </label>
         <textarea id="chat-input" placeholder="Describe your issue or deployment goal…"></textarea>
         <button id="chat-send">Send</button>
       </div>
@@ -467,15 +483,18 @@ let chatJobId = null;
 let chatPlan = null;
 let chatMode = null; // 'troubleshoot'|'build'
 let chatInstanceId = null; // currently active instance for chat
+let chatAttachment = null; // {name, mime, data} — file attached to next send
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Utils
 // ──────────────────────────────────────────────────────────────────────────────
 const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-const api = (url, opts={}) => fetch(url, {
-  headers:{'Content-Type':'application/json',...(opts.headers||{})},
-  ...opts
-}).then(r=>r.json());
+const api = (url, opts={}) => {
+  // When body is FormData let the browser set Content-Type (with boundary)
+  const isForm = opts.body instanceof FormData;
+  const headers = isForm ? (opts.headers||{}) : {'Content-Type':'application/json',...(opts.headers||{})};
+  return fetch(url, {...opts, headers}).then(r=>r.json());
+};
 
 function scoreColor(s){
   if(s==null)return'var(--muted)';
@@ -860,20 +879,45 @@ async function sendChat(isReplicate=false, srcId=null, tgtId=null){
 
   const inp = document.getElementById('chat-input');
   const msg = inp.value.trim();
-  if(!msg)return;
+  if(!msg && !chatAttachment)return;
   inp.value='';
-  appendMsg('user', esc(msg));
+
+  // Show user message, optionally with attachment thumbnail/label
+  let userHtml = msg ? esc(msg) : '';
+  if(chatAttachment){
+    const isImg = chatAttachment.mime.startsWith('image/');
+    const attachHtml = isImg
+      ? `<br><img src="data:${esc(chatAttachment.mime)};base64,${chatAttachment.data}" style="max-height:80px;max-width:200px;border-radius:4px;margin-top:4px">`
+      : `<br><span style="font-size:11px;opacity:0.7">📎 ${esc(chatAttachment.name)}</span>`;
+    userHtml += attachHtml;
+  }
+  appendMsg('user', userHtml);
 
   if(isReplicate){
     chatJobId=null; chatPlan=null; chatMode=null;
+    clearAttachment();
     await startReplicate(srcId, iid, msg);
     return;
   }
 
+  // Build request: multipart when attachment present, JSON otherwise
+  let fetchOpts;
+  if(chatAttachment){
+    const fd = new FormData();
+    fd.append('instance_id', iid);
+    fd.append('message', msg || '(see attachment)');
+    fd.append('attach_name', chatAttachment.name);
+    fd.append('attach_mime', chatAttachment.mime);
+    fd.append('attach_data', chatAttachment.data);
+    fetchOpts = {method:'POST', body:fd};
+  } else {
+    fetchOpts = {method:'POST', body:JSON.stringify({instance_id:iid, message:msg})};
+  }
+  clearAttachment();
+
   // Send to conversational AI — it asks questions or proposes an action
   appendMsg('system','<span class="spinner"></span> Thinking…',null,false);
-  const res = await api('/api/chat/message',{method:'POST',
-    body:JSON.stringify({instance_id:iid,message:msg})});
+  const res = await api('/api/chat/message', fetchOpts);
   const msgs = document.getElementById('chat-messages');
   msgs.removeChild(msgs.lastChild);  // remove spinner
 
@@ -900,6 +944,40 @@ async function sendChat(isReplicate=false, srcId=null, tgtId=null){
   } else {
     appendMsg('ai', esc(data.reply||''));
   }
+}
+
+function handleAttachSelect(input){
+  const file = input.files[0];
+  if(!file) return;
+  const maxBytes = 5 * 1024 * 1024; // 5 MB
+  if(file.size > maxBytes){alert('Attachment must be under 5 MB.'); input.value=''; return;}
+  const reader = new FileReader();
+  reader.onload = e => {
+    // e.target.result is data:<mime>;base64,<data> for readAsDataURL
+    const dataUrl = e.target.result;
+    const base64 = dataUrl.split(',')[1];
+    chatAttachment = {name: file.name, mime: file.type || 'application/octet-stream', data: base64};
+    renderAttachPreview();
+  };
+  reader.readAsDataURL(file);
+  input.value = ''; // reset so same file can be re-selected
+}
+
+function renderAttachPreview(){
+  const el = document.getElementById('attach-preview');
+  if(!chatAttachment){el.style.display='none'; el.innerHTML=''; return;}
+  const isImg = chatAttachment.mime.startsWith('image/');
+  const thumb = isImg
+    ? `<img src="data:${esc(chatAttachment.mime)};base64,${chatAttachment.data}" alt="">`
+    : `<span>📄</span>`;
+  el.innerHTML = `${thumb}<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(chatAttachment.name)}</span>
+    <button class="attach-remove" onclick="clearAttachment()" title="Remove attachment">✕</button>`;
+  el.style.display='flex';
+}
+
+function clearAttachment(){
+  chatAttachment = null;
+  renderAttachPreview();
 }
 
 async function startExplore(iid, msg){

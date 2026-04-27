@@ -339,15 +339,43 @@ Guidelines:
 - Keep replies concise and professional."""
 
 
-def chat_reply(user_message: str, instance_label: str, history: list) -> dict:
+def chat_reply(user_message: str, instance_label: str, history: list, attachment: dict = None) -> dict:
     """
     Process a conversational turn.
     Returns a dict with 'type' ('reply' | 'action_proposal') and associated fields.
     history is mutated in place for multi-turn context.
+
+    attachment (optional): {"name": str, "mime": str, "data": str (base64)}
+      - Image types (image/*) are sent as vision image_url content.
+      - Text types are appended inline to the user message.
     """
-    content = f"[Instance: {instance_label}]\nUser: {user_message}"
+    if attachment:
+        mime = attachment.get("mime", "")
+        data = attachment.get("data", "")
+        name = attachment.get("name", "file")
+        if mime.startswith("image/") and data:
+            content = [
+                {"type": "text", "text": f"[Instance: {instance_label}]\nUser: {user_message}"},
+                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}"}},
+            ]
+        else:
+            # Text / unknown — decode and include inline
+            try:
+                import base64 as _b64
+                text_content = _b64.b64decode(data).decode("utf-8", errors="replace")[:8000]
+            except Exception:
+                text_content = "(could not decode attachment)"
+            content = (
+                f"[Instance: {instance_label}]\nUser: {user_message}\n\n"
+                f"--- Attached file: {name} ---\n{text_content}\n--- End of attachment ---"
+            )
+    else:
+        content = f"[Instance: {instance_label}]\nUser: {user_message}"
+
     history.append({"role": "user", "content": content})
     result = _call_json(CHAT_SYSTEM, history)
+    # Store a plain-text version of the user turn in history (vision payloads can't be re-used)
+    history[-1] = {"role": "user", "content": f"[Instance: {instance_label}]\nUser: {user_message}"}
     history.append({"role": "assistant", "content": json.dumps(result)})
     return result
 
