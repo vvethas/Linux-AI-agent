@@ -1830,7 +1830,12 @@ function renderMonCard(inst, t){
 
 async function loadMonitoring(){
   const grid = document.getElementById('mon-inst-grid');
-  grid.innerHTML='<p class="empty-msg"><span class="spinner"></span> Polling instances…</p>';
+  // Only show the loading spinner on the very first load (empty grid).
+  // Background auto-polls must leave existing cards in place so they don't
+  // all flash to "gone" for the entire SSH polling duration (~5-35 s).
+  if(!grid.querySelector('.mon-card')){
+    grid.innerHTML='<p class="empty-msg"><span class="spinner"></span> Polling instances…</p>';
+  }
   const res = await api('/api/monitoring');
   if(!res.ok){
     grid.innerHTML=`<p class="empty-msg" style="color:var(--red)">Error: ${esc(res.error)}</p>`;
