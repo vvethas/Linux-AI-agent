@@ -272,6 +272,33 @@ h2.section-title{color:var(--accent)}
 .failed-svc-warn{color:var(--red);font-size:11px;font-weight:600;margin-top:2px}
 .modal-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;align-items:center;justify-content:center}
 .modal-backdrop.open{display:flex}
+.mon-card{cursor:pointer}
+.mon-card:hover{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+#mon-detail-overlay{display:none;position:fixed;inset:0;background:var(--bg);z-index:3000;flex-direction:column;overflow:hidden}
+#mon-detail-overlay.open{display:flex}
+#mon-detail-header{background:var(--surface);border-bottom:1px solid var(--border);padding:0.85rem 1.25rem;display:flex;align-items:center;gap:0.75rem;flex-shrink:0}
+#mon-detail-close{background:none;color:var(--muted);font-size:20px;padding:0 6px;margin-left:auto;line-height:1}
+#mon-detail-close:hover{color:var(--text)}
+#mon-detail-body{flex:1;overflow-y:auto;padding:1.5rem;display:flex;flex-direction:column;gap:1.25rem}
+.mon-detail-section{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:1rem}
+.mon-detail-section-title{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:0.75rem}
+.mon-detail-metrics-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:0.75rem}
+.mon-detail-metric{background:var(--surface2);border-radius:5px;padding:0.75rem;text-align:center}
+.mon-detail-metric-val{font-size:1.5rem;font-weight:700;line-height:1}
+.mon-detail-metric-lbl{font-size:11px;color:var(--muted);margin-top:4px}
+.mon-detail-bar-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:12px}
+.mon-detail-bar-label{width:52px;color:var(--muted)}
+.mon-detail-bar-track{flex:1;height:10px;background:var(--border);border-radius:5px;overflow:hidden}
+.mon-detail-bar-fill{height:100%;border-radius:5px;transition:width .4s}
+.mon-detail-bar-pct{width:44px;text-align:right;font-weight:600}
+.mon-detail-svc-grid{display:flex;flex-wrap:wrap;gap:6px}
+.mon-detail-svc-pill{padding:3px 12px;border-radius:10px;font-size:11px;font-weight:600}
+.mon-detail-procs{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+.mon-detail-proc-title{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+.mon-detail-proc-table{width:100%;border-collapse:collapse;font-size:12px}
+.mon-detail-proc-table td{padding:4px 6px;border-bottom:1px solid var(--border)}
+.mon-detail-proc-table td:first-child{color:var(--accent);font-family:monospace;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mon-detail-proc-table td:last-child{text-align:right;color:var(--muted);white-space:nowrap}
 </style>
 </head>
 <body>
@@ -494,6 +521,18 @@ h2.section-title{color:var(--accent)}
 </div><!-- /body -->
 </div><!-- /app -->
 
+<!-- ── Instance Detail Full-Screen Overlay ───────────────────────────────── -->
+<div id="mon-detail-overlay">
+  <div id="mon-detail-header">
+    <div id="mon-detail-dot" class="mon-card-dot"></div>
+    <span id="mon-detail-title" style="font-size:1rem;font-weight:700;color:var(--text)"></span>
+    <span id="mon-detail-host" style="font-size:12px;color:var(--muted)"></span>
+    <span id="mon-detail-badge" class="mon-status-badge"></span>
+    <button id="mon-detail-close" onclick="closeMonDetail()" title="Close (Esc)">✕</button>
+  </div>
+  <div id="mon-detail-body"></div>
+</div>
+
 <!-- ── Side panel ────────────────────────────────────────────────────────── -->
 <div id="side-panel">
   <div id="panel-header">
@@ -576,6 +615,7 @@ let chatPlan = null;
 let chatMode = null; // 'troubleshoot'|'build'
 let chatInstanceId = null; // currently active instance for chat
 let chatAttachment = null; // {name, mime, data} — file attached to next send
+let monInstCache = {};   // id → inst data from last monitoring poll
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Utils
@@ -1668,7 +1708,7 @@ function renderMonCard(inst, t){
   const badgeCls = 'badge-'+status;
 
   if(status==='unreachable'){
-    return`<div class="mon-card unreachable">
+    return`<div class="mon-card unreachable" onclick="openMonDetail(${inst.id})">
       <div class="mon-card-header">
         <div class="mon-card-dot ${dotCls}"></div>
         <strong style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(inst.label)}</strong>
@@ -1750,7 +1790,7 @@ function renderMonCard(inst, t){
     <span style="margin-left:auto">${m.running_svc_count??'—'} services</span>
   </div>`;
 
-  return`<div class="mon-card">
+  return`<div class="mon-card" onclick="openMonDetail(${inst.id})">
     <div class="mon-card-header">
       <div class="mon-card-dot ${dotCls}"></div>
       <strong style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(inst.label)}</strong>
@@ -1808,6 +1848,8 @@ async function loadMonitoring(){
 
   // Instance grid
   const insts = d.instances||[];
+  monInstCache = {};
+  insts.forEach(i=>{ monInstCache[i.id]=i; });
   grid.innerHTML = insts.length
     ? insts.map(inst=>renderMonCard(inst, monitorThresholds)).join('')
     : '<p class="empty-msg">No instances configured.</p>';
@@ -1858,6 +1900,176 @@ async function saveThresholds(){
     setMsg('thr-msg','Error: '+res.error, false);
   }
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Instance Detail full-screen overlay
+// ──────────────────────────────────────────────────────────────────────────────
+function openMonDetail(id){
+  const inst = monInstCache[id];
+  if(!inst) return;
+  const t = monitorThresholds;
+  const status = inst.status;
+  const dotCls  = 'dot-'+status;
+  const badgeCls = 'badge-'+status;
+
+  // Update header
+  const dot = document.getElementById('mon-detail-dot');
+  dot.className = 'mon-card-dot '+dotCls;
+  document.getElementById('mon-detail-title').textContent = inst.label;
+  document.getElementById('mon-detail-host').textContent  = inst.host;
+  const badge = document.getElementById('mon-detail-badge');
+  badge.className = 'mon-status-badge '+badgeCls;
+  badge.textContent = status;
+
+  const body = document.getElementById('mon-detail-body');
+
+  if(status === 'unreachable'){
+    body.innerHTML = `
+      <div class="mon-detail-section">
+        <div class="mon-detail-section-title">Connection Error</div>
+        <p style="color:var(--red);font-size:13px">${esc(inst.error||'SSH connection failed')}</p>
+      </div>`;
+    document.getElementById('mon-detail-overlay').classList.add('open');
+    return;
+  }
+
+  const m = inst.metrics||{};
+  const cpu  = m.cpu_pct;
+  const mem  = m.mem_pct;
+  const disk = m.disk_pct;
+  const cpuCol  = monMetricColor(cpu,  t.cpu_warn,  t.cpu_crit);
+  const memCol  = monMetricColor(mem,  t.mem_warn,  t.mem_crit);
+  const diskCol = monMetricColor(disk, t.disk_warn, t.disk_crit);
+  const memGB   = (m.mem_used_mb&&m.mem_total_mb)
+    ? `${(m.mem_used_mb/1024).toFixed(2)} / ${(m.mem_total_mb/1024).toFixed(2)} GB` : '—';
+  const diskGB  = (m.disk_used_kb&&m.disk_total_kb)
+    ? `${(m.disk_used_kb/1048576).toFixed(1)} / ${(m.disk_total_kb/1048576).toFixed(1)} GB` : '—';
+
+  // Metrics grid
+  const metricsSection = `
+    <div class="mon-detail-section">
+      <div class="mon-detail-section-title">System Metrics</div>
+      <div class="mon-detail-metrics-grid">
+        <div class="mon-detail-metric">
+          <div class="mon-detail-metric-val" style="color:${cpuCol}">${cpu??'—'}%</div>
+          <div class="mon-detail-metric-lbl">CPU Usage</div>
+        </div>
+        <div class="mon-detail-metric">
+          <div class="mon-detail-metric-val" style="color:${memCol};font-size:1.1rem">${memGB}</div>
+          <div class="mon-detail-metric-lbl">Memory</div>
+        </div>
+        <div class="mon-detail-metric">
+          <div class="mon-detail-metric-val" style="color:${diskCol};font-size:1.1rem">${diskGB}</div>
+          <div class="mon-detail-metric-lbl">Disk (/)</div>
+        </div>
+        <div class="mon-detail-metric">
+          <div class="mon-detail-metric-val" style="font-size:0.95rem">${esc(m.uptime_str||'—')}</div>
+          <div class="mon-detail-metric-lbl">Uptime</div>
+        </div>
+        <div class="mon-detail-metric">
+          <div class="mon-detail-metric-val" style="font-size:1rem">${esc(m.load_avg||'—')}</div>
+          <div class="mon-detail-metric-lbl">Load Average</div>
+        </div>
+        <div class="mon-detail-metric">
+          <div class="mon-detail-metric-val">${m.running_svc_count??'—'}</div>
+          <div class="mon-detail-metric-lbl">Running Services</div>
+        </div>
+        <div class="mon-detail-metric">
+          <div class="mon-detail-metric-val" style="color:${m.failed_svc_count>0?'var(--red)':'var(--green)'}">${m.failed_svc_count??'—'}</div>
+          <div class="mon-detail-metric-lbl">Failed Services</div>
+        </div>
+        <div class="mon-detail-metric">
+          <div class="mon-detail-metric-val" style="font-size:0.95rem">${fmtBytes(m.net_rx_bytes)} / ${fmtBytes(m.net_tx_bytes)}</div>
+          <div class="mon-detail-metric-lbl">Network RX / TX</div>
+        </div>
+      </div>
+    </div>`;
+
+  // Progress bars section
+  const barsSection = `
+    <div class="mon-detail-section">
+      <div class="mon-detail-section-title">Resource Utilisation</div>
+      <div class="mon-detail-bar-row">
+        <span class="mon-detail-bar-label">CPU</span>
+        <div class="mon-detail-bar-track"><div class="mon-detail-bar-fill" style="width:${Math.min(cpu||0,100)}%;background:${cpuCol}"></div></div>
+        <span class="mon-detail-bar-pct" style="color:${cpuCol}">${cpu??'—'}%</span>
+      </div>
+      <div class="mon-detail-bar-row">
+        <span class="mon-detail-bar-label">Memory</span>
+        <div class="mon-detail-bar-track"><div class="mon-detail-bar-fill" style="width:${Math.min(mem||0,100)}%;background:${memCol}"></div></div>
+        <span class="mon-detail-bar-pct" style="color:${memCol}">${mem??'—'}%</span>
+      </div>
+      <div class="mon-detail-bar-row">
+        <span class="mon-detail-bar-label">Disk</span>
+        <div class="mon-detail-bar-track"><div class="mon-detail-bar-fill" style="width:${Math.min(disk||0,100)}%;background:${diskCol}"></div></div>
+        <span class="mon-detail-bar-pct" style="color:${diskCol}">${disk??'—'}%</span>
+      </div>
+    </div>`;
+
+  // Services section
+  const svcs = m.key_services||{};
+  const svcPills = Object.entries(svcs).map(([name,state])=>{
+    const active = state==='active';
+    return`<span class="mon-detail-svc-pill ${active?'svc-active':'svc-inactive'}">${esc(name)}: ${esc(state)}</span>`;
+  }).join('');
+  const failWarn = m.failed_svc_count>0
+    ? `<div class="failed-svc-warn" style="margin-top:8px">⚠ ${m.failed_svc_count} failed service${m.failed_svc_count>1?'s':''}</div>`
+    : '';
+  const svcsSection = `
+    <div class="mon-detail-section">
+      <div class="mon-detail-section-title">Key Services</div>
+      <div class="mon-detail-svc-grid">${svcPills||'<span style="color:var(--muted);font-size:12px">No data</span>'}</div>
+      ${failWarn}
+    </div>`;
+
+  // Top processes section
+  const topCpu = m.top_cpu_procs||[];
+  const topMem = m.top_mem_procs||[];
+  const cpuRows = topCpu.map(p=>`<tr><td title="${esc(p.name)}">${esc(p.name)}</td><td>${p.cpu}%</td><td>${p.mem}% mem</td></tr>`).join('');
+  const memRows = topMem.map(p=>`<tr><td title="${esc(p.name)}">${esc(p.name)}</td><td>${p.mem}%</td><td>${p.cpu}% cpu</td></tr>`).join('');
+  const procsSection = `
+    <div class="mon-detail-section">
+      <div class="mon-detail-section-title">Top Processes</div>
+      <div class="mon-detail-procs">
+        <div>
+          <div class="mon-detail-proc-title">By CPU</div>
+          ${cpuRows?`<table class="mon-detail-proc-table">${cpuRows}</table>`:'<span style="color:var(--muted);font-size:12px">No data</span>'}
+        </div>
+        <div>
+          <div class="mon-detail-proc-title">By Memory</div>
+          ${memRows?`<table class="mon-detail-proc-table">${memRows}</table>`:'<span style="color:var(--muted);font-size:12px">No data</span>'}
+        </div>
+      </div>
+    </div>`;
+
+  // Active alerts for this instance
+  const myAlerts = (inst.alerts||[]);
+  const alertsSection = myAlerts.length ? `
+    <div class="mon-detail-section mon-alerts-banner" style="margin-bottom:0">
+      <div class="mon-detail-section-title" style="color:var(--red)">Active Alerts</div>
+      ${myAlerts.map(a=>`
+        <div class="mon-alert-item">
+          <span class="badge ${a.severity==='critical'?'badge-critical':'badge-warning'}">${esc(a.severity)}</span>
+          <span>${esc(a.metric)}: ${a.value}${typeof a.value==='number'&&a.metric!=='Failed Services'?'%':''} (threshold ${a.threshold}${typeof a.threshold==='number'&&a.metric!=='Failed Services'?'%':''})</span>
+        </div>`).join('')}
+    </div>` : '';
+
+  body.innerHTML = alertsSection + metricsSection + barsSection + svcsSection + procsSection;
+  document.getElementById('mon-detail-overlay').classList.add('open');
+}
+
+function closeMonDetail(){
+  document.getElementById('mon-detail-overlay').classList.remove('open');
+}
+
+// Close detail overlay on Escape key
+document.addEventListener('keydown', e=>{
+  if(e.key==='Escape'){
+    if(document.getElementById('mon-detail-overlay').classList.contains('open')){
+      closeMonDetail();
+    }
+  }
+});
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Init
