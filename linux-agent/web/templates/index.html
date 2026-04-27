@@ -548,6 +548,7 @@ function renderSidebar(){
       <div class="inst-actions">
         <button class="inst-action-btn" title="Study" onclick="event.stopPropagation();studyInstance(${i.id})">⊕</button>
         <button class="inst-action-btn" title="Schedule" onclick="event.stopPropagation();openScheduleFor(${i.id})">⏱</button>
+        <button class="inst-action-btn" title="Remove instance" style="color:var(--red)" onclick="event.stopPropagation();removeInstance(${i.id})">✕</button>
       </div>
     </div>`).join('');
 }
@@ -668,9 +669,32 @@ async function addInstance(){
   const data = modalFormData();
   if(!data.label||!data.host||!data.username){setMsg('m-test-msg','Label, host, and username required',false);return;}
   if(data.auth_type==='key'&&!data.key_path){setMsg('m-test-msg','Please upload a .pem key file',false);return;}
+  // Duplicate check: same host + port + username already exists
+  const dup = instances.find(i=>i.host===data.host&&String(i.port)===String(data.port)&&i.username===data.username);
+  if(dup){setMsg('m-test-msg',`Duplicate: instance "${dup.label}" already uses ${data.host}:${data.port} (${data.username})`,false);return;}
+  // Save the instance
   const res = await api('/api/instances',{method:'POST',body:JSON.stringify(data)});
   if(!res.ok){setMsg('m-test-msg',res.error,false);return;}
+  const iid = res.data.id;
+  // Test SSH connection — roll back on failure
+  setMsg('m-test-msg','Testing SSH connection…',true);
+  const res2 = await api(`/api/instances/${iid}/test`,{method:'POST'});
+  if(!res2.data?.ok){
+    await api(`/api/instances/${iid}`,{method:'DELETE'});
+    setMsg('m-test-msg','SSH connection failed: '+(res2.data?.error||'unknown'),false);
+    return;
+  }
   closeModal();
+  await loadInstances();
+  loadDashboard();
+}
+
+async function removeInstance(id){
+  const inst = instances.find(i=>i.id===id);
+  if(!confirm(`Remove instance "${inst?.label||id}"? All associated jobs and history will be deleted.`))return;
+  const res = await api(`/api/instances/${id}`,{method:'DELETE'});
+  if(!res.ok){alert('Failed to remove instance: '+(res.error||'unknown'));return;}
+  if(selectedInstanceId===id) selectedInstanceId=null;
   await loadInstances();
   loadDashboard();
 }
