@@ -1024,6 +1024,180 @@ def scheduler_jobs():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Monitoring
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MONITORING_DEFAULTS: dict = {
+    "cpu_warn": 75.0,
+    "cpu_crit": 90.0,
+    "mem_warn": 70.0,
+    "mem_crit": 85.0,
+    "disk_warn": 75.0,
+    "disk_crit": 90.0,
+}
+
+
+def _load_thresholds() -> dict:
+    raw = db.get_config("monitoring_thresholds", None)
+    if raw:
+        try:
+            saved = json.loads(raw)
+            return {**_MONITORING_DEFAULTS, **{k: float(v) for k, v in saved.items()}}
+        except Exception:
+            pass
+    return dict(_MONITORING_DEFAULTS)
+
+
+def _compute_health(metrics: dict, thresholds: dict) -> tuple:
+    """Return (status_str, alerts_list) for one instance."""
+    cpu = metrics.get("cpu_pct", 0.0)
+    mem = metrics.get("mem_pct", 0.0)
+    disk = metrics.get("disk_pct", 0.0)
+    alerts: list = []
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    def _check(label, value, warn, crit):
+        if value >= crit:
+            alerts.append({
+                "severity": "critical",
+                "metric": label,
+                "value": value,
+                "threshold": crit,
+                "at": now_iso,
+            })
+        elif value >= warn:
+            alerts.append({
+                "severity": "warning",
+                "metric": label,
+                "value": value,
+                "threshold": warn,
+                "at": now_iso,
+            })
+
+    _check("CPU", cpu, thresholds["cpu_warn"], thresholds["cpu_crit"])
+    _check("Memory", mem, thresholds["mem_warn"], thresholds["mem_crit"])
+    _check("Disk", disk, thresholds["disk_warn"], thresholds["disk_crit"])
+
+    failed = metrics.get("failed_svc_count", 0)
+    if failed > 0:
+        alerts.append({
+            "severity": "warning",
+            "metric": "Failed Services",
+            "value": failed,
+            "threshold": 0,
+            "at": now_iso,
+        })
+
+    if any(a["severity"] == "critical" for a in alerts):
+        status = "critical"
+    elif alerts:
+        status = "warning"
+    else:
+        status = "healthy"
+
+    return status, alerts
+
+
+@app.route("/api/monitoring/thresholds", methods=["GET"])
+def get_monitoring_thresholds():
+    return _ok(_load_thresholds())
+
+
+@app.route("/api/monitoring/thresholds", methods=["POST"])
+def set_monitoring_thresholds():
+    body = request.json or {}
+    t: dict = {}
+    for key in ("cpu_warn", "cpu_crit", "mem_warn", "mem_crit", "disk_warn", "disk_crit"):
+        try:
+            t[key] = float(body.get(key, _MONITORING_DEFAULTS[key]))
+        except (TypeError, ValueError):
+            t[key] = _MONITORING_DEFAULTS[key]
+    db.set_config("monitoring_thresholds", json.dumps(t))
+    return _ok(t)
+
+
+@app.route("/api/monitoring", methods=["GET"])
+def get_monitoring():
+    instances = db.list_instances()
+    thresholds = _load_thresholds()
+    poll_results: dict = {}
+    poll_errors: dict = {}
+
+    def _poll(inst):
+        try:
+            metrics = _ssh.collect_monitoring(inst)
+            poll_results[inst["id"]] = metrics
+        except Exception as exc:
+            poll_errors[inst["id"]] = str(exc).split("\n")[0][:200]
+
+    threads = [
+        threading.Thread(target=_poll, args=(inst,), daemon=True)
+        for inst in instances
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=35)
+
+    inst_data: list = []
+    all_alerts: list = []
+    cpu_vals: list = []
+    mem_vals: list = []
+    online_count = 0
+    offline_count = 0
+
+    for inst in instances:
+        iid = inst["id"]
+        if iid in poll_errors:
+            inst_data.append({
+                "id": iid,
+                "label": inst["label"],
+                "host": inst["host"],
+                "status": "unreachable",
+                "error": poll_errors[iid],
+                "metrics": None,
+                "alerts": [],
+            })
+            offline_count += 1
+        else:
+            metrics = poll_results.get(iid, {})
+            status, inst_alerts = _compute_health(metrics, thresholds)
+            for a in inst_alerts:
+                a["instance_id"] = iid
+                a["instance_label"] = inst["label"]
+            all_alerts.extend(inst_alerts)
+            if metrics.get("cpu_pct") is not None:
+                cpu_vals.append(metrics["cpu_pct"])
+            if metrics.get("mem_pct") is not None:
+                mem_vals.append(metrics["mem_pct"])
+            online_count += 1
+            inst_data.append({
+                "id": iid,
+                "label": inst["label"],
+                "host": inst["host"],
+                "status": status,
+                "metrics": metrics,
+                "alerts": inst_alerts,
+            })
+
+    summary = {
+        "total": len(instances),
+        "online": online_count,
+        "offline": offline_count,
+        "alert_count": len(all_alerts),
+        "avg_cpu": round(sum(cpu_vals) / len(cpu_vals), 1) if cpu_vals else None,
+        "avg_mem": round(sum(mem_vals) / len(mem_vals), 1) if mem_vals else None,
+    }
+
+    return _ok({
+        "instances": inst_data,
+        "alerts": all_alerts,
+        "summary": summary,
+        "thresholds": thresholds,
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Bootstrap
 # ─────────────────────────────────────────────────────────────────────────────
 

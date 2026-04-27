@@ -232,6 +232,46 @@ input[type=checkbox]{width:auto;cursor:pointer}
 .section-title{font-size:16px;font-weight:700;margin-bottom:1rem;color:var(--text)}
 h2.section-title{color:var(--accent)}
 .empty-msg{color:var(--muted);font-size:13px;padding:1rem 0}
+
+/* ── monitoring ──────────────────────────────────────────────────────────── */
+.mon-inst-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:1rem;margin-bottom:1rem}
+.mon-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:1rem;display:flex;flex-direction:column;gap:0.5rem}
+.mon-card.unreachable{opacity:.55}
+.mon-card-header{display:flex;align-items:center;gap:0.6rem}
+.mon-card-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.dot-healthy{background:var(--green)}.dot-warning{background:var(--yellow)}
+.dot-critical{background:var(--red)}.dot-unreachable{background:var(--muted)}
+.mon-status-badge{padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;text-transform:uppercase;margin-left:auto;flex-shrink:0}
+.badge-healthy{background:#1b3a1b;color:var(--green)}.badge-warning{background:#2a2a1b;color:var(--yellow)}
+.badge-critical{background:#3a1b1b;color:var(--red)}.badge-unreachable{background:#1e1e1e;color:var(--muted)}
+.mon-metrics-row{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin:4px 0}
+.mon-metric{background:var(--surface2);border-radius:4px;padding:5px 6px;text-align:center}
+.mon-metric-val{font-size:13px;font-weight:700}.mon-metric-lbl{font-size:10px;color:var(--muted);margin-top:1px}
+.mon-bars{display:flex;flex-direction:column;gap:5px}
+.mon-bar-row{display:flex;align-items:center;gap:6px;font-size:11px}
+.mon-bar-label{width:36px;color:var(--muted);flex-shrink:0}
+.mon-bar-track{flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+.mon-bar-fill{height:100%;border-radius:3px;transition:width .4s}.mon-bar-pct{width:36px;text-align:right;color:var(--text2)}
+.mon-svcs{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
+.svc-pill{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600}
+.svc-active{background:#1b3a1b;color:var(--green)}.svc-inactive{background:#1e1e1e;color:var(--muted)}
+.mon-proc-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}
+.mon-proc-title{font-size:10px;color:var(--muted);margin-bottom:2px}
+.mon-proc-table{font-size:11px;width:100%;border-collapse:collapse}
+.mon-proc-table td{padding:2px 4px;border-bottom:1px solid var(--border)}
+.mon-proc-table td:first-child{color:var(--accent);font-family:monospace;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mon-proc-table td:last-child{text-align:right;color:var(--muted);white-space:nowrap}
+.mon-card-footer{display:flex;gap:1rem;font-size:11px;color:var(--muted);border-top:1px solid var(--border);padding-top:6px;margin-top:2px;flex-wrap:wrap}
+.mon-alerts-banner{background:#3a1b1b;border:1px solid #5a2b2b;border-radius:6px;padding:0.75rem 1rem;margin-bottom:1rem}
+.mon-alerts-banner h4{color:var(--red);margin-bottom:0.5rem;font-size:13px}
+.mon-alert-item{display:flex;gap:0.75rem;align-items:center;padding:3px 0;font-size:12px;border-bottom:1px solid #5a2b2b}
+.mon-alert-item:last-child{border-bottom:none}
+.mon-footer-bar{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:0.6rem 1rem;display:flex;align-items:center;gap:1.5rem;font-size:12px;color:var(--muted);flex-wrap:wrap;margin-top:0.5rem}
+.mon-footer-bar code{color:var(--accent)}
+.unreachable-msg{font-size:12px;color:var(--red);font-style:italic;padding:4px 0}
+.failed-svc-warn{color:var(--red);font-size:11px;font-weight:600;margin-top:2px}
+.modal-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;align-items:center;justify-content:center}
+.modal-backdrop.open{display:flex}
 </style>
 </head>
 <body>
@@ -246,6 +286,7 @@ h2.section-title{color:var(--accent)}
     <button class="nav-tab" data-tab="jobs">Job History</button>
     <button class="nav-tab" data-tab="studies">Study Reports</button>
     <button class="nav-tab" data-tab="alerts">Alerts &amp; Schedule</button>
+    <button class="nav-tab" data-tab="monitoring">Monitoring</button>
   </div>
 </div>
 
@@ -422,6 +463,33 @@ h2.section-title{color:var(--accent)}
     </div>
   </div>
 
+  <!-- Monitoring tab -->
+  <div id="tab-monitoring" class="tab-pane">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+      <h2 class="section-title" style="margin:0">Real-time Monitoring</h2>
+      <div style="display:flex;gap:0.75rem;align-items:center">
+        <span id="mon-last-poll" style="font-size:12px;color:var(--muted)"></span>
+        <button class="btn-sm" onclick="loadMonitoring()">↻ Refresh</button>
+        <button class="btn-sm" onclick="openThresholdModal()">⚙ Thresholds</button>
+      </div>
+    </div>
+    <div class="stat-cards" id="mon-stat-cards">
+      <div class="stat-card"><div class="stat-val" id="mon-total">—</div><div class="stat-label">Monitored</div></div>
+      <div class="stat-card"><div class="stat-val" id="mon-avg-cpu">—</div><div class="stat-label">Avg CPU %</div></div>
+      <div class="stat-card"><div class="stat-val" id="mon-avg-mem">—</div><div class="stat-label">Avg Memory %</div></div>
+      <div class="stat-card"><div class="stat-val" id="mon-alert-count" style="color:var(--red)">—</div><div class="stat-label">Active Alerts</div></div>
+    </div>
+    <div id="mon-alerts-banner" style="display:none" class="mon-alerts-banner">
+      <h4>⚠ Active Alerts</h4>
+      <div id="mon-alerts-list"></div>
+    </div>
+    <div id="mon-inst-grid" class="mon-inst-grid"></div>
+    <div class="mon-footer-bar">
+      <span>Auto-refresh: <code>30s</code></span>
+      <span id="mon-thresholds-display"></span>
+    </div>
+  </div>
+
 </div><!-- /main -->
 </div><!-- /body -->
 </div><!-- /app -->
@@ -468,6 +536,30 @@ h2.section-title{color:var(--accent)}
       <button class="btn-cancel" onclick="closeModal()">Cancel</button>
       <button class="btn-sm" onclick="testInstanceModal()">Test SSH</button>
       <button class="btn-primary" onclick="addInstance()">Add Instance</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Threshold Config Modal ────────────────────────────────────────────── -->
+<div id="modal-thresholds-overlay" class="modal-backdrop">
+  <div class="modal">
+    <h2>Monitoring Thresholds</h2>
+    <div class="form-row">
+      <div class="form-field"><label>CPU Warning %</label><input type="number" id="thr-cpu-warn" min="1" max="99" step="1"/></div>
+      <div class="form-field"><label>CPU Critical %</label><input type="number" id="thr-cpu-crit" min="1" max="100" step="1"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-field"><label>Memory Warning %</label><input type="number" id="thr-mem-warn" min="1" max="99" step="1"/></div>
+      <div class="form-field"><label>Memory Critical %</label><input type="number" id="thr-mem-crit" min="1" max="100" step="1"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-field"><label>Disk Warning %</label><input type="number" id="thr-disk-warn" min="1" max="99" step="1"/></div>
+      <div class="form-field"><label>Disk Critical %</label><input type="number" id="thr-disk-crit" min="1" max="100" step="1"/></div>
+    </div>
+    <div id="thr-msg" style="margin-top:6px"></div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeThresholdModal()">Cancel</button>
+      <button class="btn-primary" onclick="saveThresholds()">Save</button>
     </div>
   </div>
 </div>
@@ -528,6 +620,7 @@ function fmtDur(sec){
 // ──────────────────────────────────────────────────────────────────────────────
 document.querySelectorAll('.nav-tab').forEach(btn=>{
   btn.addEventListener('click',()=>{
+    stopMonitorPoll();
     activeTab = btn.dataset.tab;
     document.querySelectorAll('.nav-tab').forEach(b=>b.classList.toggle('active',b===btn));
     document.querySelectorAll('.tab-pane').forEach(p=>{
@@ -537,6 +630,7 @@ document.querySelectorAll('.nav-tab').forEach(btn=>{
     else if(activeTab==='jobs')loadJobs();
     else if(activeTab==='studies')loadStudies();
     else if(activeTab==='alerts'){loadNotifyConfig();loadSchedulerJobs();}
+    else if(activeTab==='monitoring') startMonitorPoll();
     else if(activeTab==='chat'){
       const iid=parseInt(document.getElementById('chat-instance-select').value)||null;
       if(iid&&iid!==chatInstanceId){chatInstanceId=iid;loadChatHistory(iid);}
@@ -1536,6 +1630,233 @@ async function loadSchedulerJobs(){
     `<div style="margin-bottom:4px"><code style="color:var(--accent)">${esc(j.id)}</code>
      — next: ${esc(j.next_run||'not scheduled')}</div>`).join('') :
     '<div style="color:var(--muted)">No active scheduler jobs</div>';
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Monitoring
+// ──────────────────────────────────────────────────────────────────────────────
+let monitorPollTimer = null;
+let monitorThresholds = {};
+
+function stopMonitorPoll(){
+  if(monitorPollTimer){clearInterval(monitorPollTimer);monitorPollTimer=null;}
+}
+
+function startMonitorPoll(){
+  loadMonitoring();
+  monitorPollTimer = setInterval(loadMonitoring, 30000);
+}
+
+function monMetricColor(val, warn, crit){
+  if(val==null) return 'var(--muted)';
+  if(val>=crit)  return 'var(--red)';
+  if(val>=warn)  return 'var(--yellow)';
+  return 'var(--green)';
+}
+
+function fmtBytes(b){
+  if(b==null) return '—';
+  if(b>=1e9) return (b/1e9).toFixed(1)+' GB';
+  if(b>=1e6) return (b/1e6).toFixed(1)+' MB';
+  if(b>=1e3) return (b/1e3).toFixed(1)+' KB';
+  return b+' B';
+}
+
+function renderMonCard(inst, t){
+  const status = inst.status;
+  const dotCls  = 'dot-'+status;
+  const badgeCls = 'badge-'+status;
+
+  if(status==='unreachable'){
+    return`<div class="mon-card unreachable">
+      <div class="mon-card-header">
+        <div class="mon-card-dot ${dotCls}"></div>
+        <strong style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(inst.label)}</strong>
+        <span class="mon-status-badge ${badgeCls}">unreachable</span>
+      </div>
+      <div style="font-size:11px;color:var(--muted)">${esc(inst.host)}</div>
+      <div class="unreachable-msg">${esc(inst.error||'SSH connection failed')}</div>
+    </div>`;
+  }
+
+  const m = inst.metrics||{};
+  const cpu  = m.cpu_pct;
+  const mem  = m.mem_pct;
+  const disk = m.disk_pct;
+  const cpuCol  = monMetricColor(cpu,  t.cpu_warn,  t.cpu_crit);
+  const memCol  = monMetricColor(mem,  t.mem_warn,  t.mem_crit);
+  const diskCol = monMetricColor(disk, t.disk_warn, t.disk_crit);
+
+  const memStr  = (m.mem_used_mb&&m.mem_total_mb)
+    ? `${(m.mem_used_mb/1024).toFixed(1)}/${(m.mem_total_mb/1024).toFixed(1)} GB` : '—';
+  const diskStr = (m.disk_used_kb&&m.disk_total_kb)
+    ? `${Math.round(m.disk_used_kb/1048576)}/${Math.round(m.disk_total_kb/1048576)} GB` : '—';
+
+  const metricCells=`
+    <div class="mon-metric"><div class="mon-metric-val" style="color:${cpuCol}">${cpu??'—'}%</div><div class="mon-metric-lbl">CPU</div></div>
+    <div class="mon-metric"><div class="mon-metric-val" style="color:${memCol};font-size:11px">${memStr}</div><div class="mon-metric-lbl">Memory</div></div>
+    <div class="mon-metric"><div class="mon-metric-val" style="color:${diskCol};font-size:11px">${diskStr}</div><div class="mon-metric-lbl">Disk</div></div>
+    <div class="mon-metric"><div class="mon-metric-val" style="font-size:10px;line-height:1.3">${esc(m.uptime_str||'—')}</div><div class="mon-metric-lbl">Uptime</div></div>`;
+
+  const bars=`<div class="mon-bars">
+    <div class="mon-bar-row"><span class="mon-bar-label">CPU</span>
+      <div class="mon-bar-track"><div class="mon-bar-fill" style="width:${Math.min(cpu||0,100)}%;background:${cpuCol}"></div></div>
+      <span class="mon-bar-pct" style="color:${cpuCol}">${cpu??'—'}%</span></div>
+    <div class="mon-bar-row"><span class="mon-bar-label">Mem</span>
+      <div class="mon-bar-track"><div class="mon-bar-fill" style="width:${Math.min(mem||0,100)}%;background:${memCol}"></div></div>
+      <span class="mon-bar-pct" style="color:${memCol}">${mem??'—'}%</span></div>
+    <div class="mon-bar-row"><span class="mon-bar-label">Disk</span>
+      <div class="mon-bar-track"><div class="mon-bar-fill" style="width:${Math.min(disk||0,100)}%;background:${diskCol}"></div></div>
+      <span class="mon-bar-pct" style="color:${diskCol}">${disk??'—'}%</span></div>
+  </div>`;
+
+  let svcOrProcs='';
+  if(status==='healthy'){
+    const svcs = m.key_services||{};
+    const pills = Object.entries(svcs).map(([name,state])=>{
+      const active = state==='active';
+      return`<span class="svc-pill ${active?'svc-active':'svc-inactive'}" title="${esc(name)}: ${esc(state)}">${esc(name)}</span>`;
+    }).join('');
+    if(pills) svcOrProcs=`<div class="mon-svcs">${pills}</div>`;
+  } else if(status==='warning'||status==='critical'){
+    const topCpu = m.top_cpu_procs||[];
+    const topMem = m.top_mem_procs||[];
+    if(topCpu.length||topMem.length){
+      svcOrProcs=`<div class="mon-proc-grid">`;
+      if(topCpu.length){
+        svcOrProcs+=`<div><div class="mon-proc-title">Top CPU</div>
+          <table class="mon-proc-table">
+            ${topCpu.map(p=>`<tr><td title="${esc(p.name)}">${esc(p.name)}</td><td>${p.cpu}%</td></tr>`).join('')}
+          </table></div>`;
+      }
+      if(topMem.length){
+        svcOrProcs+=`<div><div class="mon-proc-title">Top Memory</div>
+          <table class="mon-proc-table">
+            ${topMem.map(p=>`<tr><td title="${esc(p.name)}">${esc(p.name)}</td><td>${p.mem}%</td></tr>`).join('')}
+          </table></div>`;
+      }
+      svcOrProcs+=`</div>`;
+    }
+  }
+
+  const failedWarn = (m.failed_svc_count>0)
+    ? `<div class="failed-svc-warn">⚠ ${m.failed_svc_count} failed service${m.failed_svc_count>1?'s':''}</div>`
+    : '';
+
+  const footer=`<div class="mon-card-footer">
+    <span>RX ${fmtBytes(m.net_rx_bytes)}</span>
+    <span>TX ${fmtBytes(m.net_tx_bytes)}</span>
+    <span>Load: ${esc(m.load_avg||'—')}</span>
+    <span style="margin-left:auto">${m.running_svc_count??'—'} services</span>
+  </div>`;
+
+  return`<div class="mon-card">
+    <div class="mon-card-header">
+      <div class="mon-card-dot ${dotCls}"></div>
+      <strong style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(inst.label)}</strong>
+      <span class="mon-status-badge ${badgeCls}">${esc(status)}</span>
+    </div>
+    <div style="font-size:11px;color:var(--muted)">${esc(inst.host)}</div>
+    <div class="mon-metrics-row">${metricCells}</div>
+    ${bars}
+    ${svcOrProcs}
+    ${failedWarn}
+    ${footer}
+  </div>`;
+}
+
+async function loadMonitoring(){
+  const grid = document.getElementById('mon-inst-grid');
+  grid.innerHTML='<p class="empty-msg"><span class="spinner"></span> Polling instances…</p>';
+  const res = await api('/api/monitoring');
+  if(!res.ok){
+    grid.innerHTML=`<p class="empty-msg" style="color:var(--red)">Error: ${esc(res.error)}</p>`;
+    return;
+  }
+  const d = res.data||{};
+  monitorThresholds = d.thresholds||{};
+  const s = d.summary||{};
+
+  // Summary cards
+  document.getElementById('mon-total').textContent = s.total??'—';
+  const avgCpuEl = document.getElementById('mon-avg-cpu');
+  avgCpuEl.textContent = s.avg_cpu!=null ? s.avg_cpu+'%' : '—';
+  avgCpuEl.style.color = monMetricColor(s.avg_cpu, monitorThresholds.cpu_warn, monitorThresholds.cpu_crit);
+  const avgMemEl = document.getElementById('mon-avg-mem');
+  avgMemEl.textContent = s.avg_mem!=null ? s.avg_mem+'%' : '—';
+  avgMemEl.style.color = monMetricColor(s.avg_mem, monitorThresholds.mem_warn, monitorThresholds.mem_crit);
+  const alertCntEl = document.getElementById('mon-alert-count');
+  alertCntEl.textContent = s.alert_count??'—';
+  alertCntEl.style.color = (s.alert_count>0) ? 'var(--red)' : 'var(--green)';
+
+  // Alerts banner
+  const banner = document.getElementById('mon-alerts-banner');
+  const alertList = document.getElementById('mon-alerts-list');
+  const alerts = d.alerts||[];
+  if(alerts.length){
+    alertList.innerHTML = alerts.map(a=>`
+      <div class="mon-alert-item">
+        <span class="badge ${a.severity==='critical'?'badge-critical':'badge-warning'}">${esc(a.severity)}</span>
+        <span style="color:var(--accent)">${esc(a.instance_label||'')}</span>
+        <span>${esc(a.metric)}: ${a.value}${typeof a.value==='number'&&a.metric!=='Failed Services'?'%':''}</span>
+        <span style="color:var(--muted);margin-left:auto;font-size:11px">${fmtDate(a.at)}</span>
+      </div>`).join('');
+    banner.style.display='';
+  } else {
+    banner.style.display='none';
+  }
+
+  // Instance grid
+  const insts = d.instances||[];
+  grid.innerHTML = insts.length
+    ? insts.map(inst=>renderMonCard(inst, monitorThresholds)).join('')
+    : '<p class="empty-msg">No instances configured.</p>';
+
+  // Last poll timestamp
+  document.getElementById('mon-last-poll').textContent = 'Updated '+new Date().toLocaleTimeString();
+
+  // Footer threshold display
+  const t = monitorThresholds;
+  document.getElementById('mon-thresholds-display').innerHTML =
+    `CPU warn <code>${t.cpu_warn}%</code> crit <code>${t.cpu_crit}%</code> · `+
+    `Mem warn <code>${t.mem_warn}%</code> crit <code>${t.mem_crit}%</code> · `+
+    `Disk warn <code>${t.disk_warn}%</code> crit <code>${t.disk_crit}%</code>`;
+}
+
+async function openThresholdModal(){
+  const res = await api('/api/monitoring/thresholds');
+  const t = res.data||{};
+  document.getElementById('thr-cpu-warn').value  = t.cpu_warn??75;
+  document.getElementById('thr-cpu-crit').value  = t.cpu_crit??90;
+  document.getElementById('thr-mem-warn').value  = t.mem_warn??70;
+  document.getElementById('thr-mem-crit').value  = t.mem_crit??85;
+  document.getElementById('thr-disk-warn').value = t.disk_warn??75;
+  document.getElementById('thr-disk-crit').value = t.disk_crit??90;
+  document.getElementById('thr-msg').innerHTML='';
+  document.getElementById('modal-thresholds-overlay').classList.add('open');
+}
+
+function closeThresholdModal(){
+  document.getElementById('modal-thresholds-overlay').classList.remove('open');
+}
+
+async function saveThresholds(){
+  const t={
+    cpu_warn:  parseFloat(document.getElementById('thr-cpu-warn').value)||75,
+    cpu_crit:  parseFloat(document.getElementById('thr-cpu-crit').value)||90,
+    mem_warn:  parseFloat(document.getElementById('thr-mem-warn').value)||70,
+    mem_crit:  parseFloat(document.getElementById('thr-mem-crit').value)||85,
+    disk_warn: parseFloat(document.getElementById('thr-disk-warn').value)||75,
+    disk_crit: parseFloat(document.getElementById('thr-disk-crit').value)||90,
+  };
+  const res = await api('/api/monitoring/thresholds',{method:'POST',body:JSON.stringify(t)});
+  if(res.ok){
+    monitorThresholds = res.data;
+    closeThresholdModal();
+    if(activeTab==='monitoring') loadMonitoring();
+  } else {
+    setMsg('thr-msg','Error: '+res.error, false);
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
