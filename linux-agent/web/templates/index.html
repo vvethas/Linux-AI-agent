@@ -299,6 +299,13 @@ h2.section-title{color:var(--accent)}
 .mon-detail-proc-table td{padding:4px 6px;border-bottom:1px solid var(--border)}
 .mon-detail-proc-table td:first-child{color:var(--accent);font-family:monospace;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mon-detail-proc-table td:last-child{text-align:right;color:var(--muted);white-space:nowrap}
+.dot-maintenance{background:var(--blue)}.badge-maintenance{background:#0d2a3a;color:var(--blue)}
+.btn-hist-tab{background:var(--surface2);color:var(--muted);border:1px solid var(--border);border-radius:3px;padding:2px 7px;font-size:11px;cursor:pointer}
+.btn-hist-tab.active,.btn-hist-tab:hover{background:var(--accent);color:#000;border-color:var(--accent)}
+.mon-ah-table{width:100%;border-collapse:collapse;font-size:12px}
+.mon-ah-table th{padding:5px 8px;border-bottom:1px solid var(--border);color:var(--muted);font-weight:500;text-align:left;font-size:11px;white-space:nowrap}
+.mon-ah-table td{padding:5px 8px;border-bottom:1px solid var(--border);vertical-align:middle}
+.mon-ah-table tr:last-child td{border-bottom:none}
 </style>
 </head>
 <body>
@@ -498,6 +505,7 @@ h2.section-title{color:var(--accent)}
         <span id="mon-last-poll" style="font-size:12px;color:var(--muted)"></span>
         <button class="btn-sm" onclick="loadMonitoring()">↻ Refresh</button>
         <button class="btn-sm" onclick="openThresholdModal()">⚙ Thresholds</button>
+        <button class="btn-sm" onclick="toggleAlertHistory()">📋 Alert History</button>
       </div>
     </div>
     <div class="stat-cards" id="mon-stat-cards">
@@ -511,6 +519,21 @@ h2.section-title{color:var(--accent)}
       <div id="mon-alerts-list"></div>
     </div>
     <div id="mon-inst-grid" class="mon-inst-grid"></div>
+    <div id="mon-alert-history-section" style="display:none;margin-bottom:1rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem">
+        <h3 style="font-size:13px;font-weight:600;color:var(--text)">Alert History</h3>
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <select id="mon-ah-status" onchange="loadAlertHistory()" style="width:auto;padding:3px 8px;font-size:12px">
+            <option value="all">All</option>
+            <option value="active">Active</option>
+            <option value="resolved">Resolved</option>
+          </select>
+          <button class="btn-sm" onclick="loadAlertHistory()">↻</button>
+        </div>
+      </div>
+      <div id="mon-ah-list"></div>
+      <div id="mon-ah-summary" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
+    </div>
     <div class="mon-footer-bar">
       <span>Auto-refresh: <code>30s</code></span>
       <span id="mon-thresholds-display"></span>
@@ -1902,9 +1925,143 @@ async function saveThresholds(){
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Metric history chart (plain SVG)
+// ──────────────────────────────────────────────────────────────────────────────
+let monHistInstId = null;
+let monHistMetric = 'cpu_pct';
+let monHistRange  = '1h';
+
+function fmtChartTime(ts){
+  if(!ts) return '';
+  try{
+    const d = new Date(ts.includes('T') ? ts : ts.replace(' ','T')+'Z');
+    return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  }catch{return ts.slice(11,16);}
+}
+
+function renderHistChart(container, points, metric, t, stats){
+  if(!points||!points.length){
+    container.innerHTML='<p style="text-align:center;padding:1rem;color:var(--muted);font-size:12px">No data recorded yet — data accumulates with each refresh.</p>';
+    return;
+  }
+  const W=600,H=110,ML=40,MR=12,MT=10,MB=22;
+  const cW=W-ML-MR, cH=H-MT-MB;
+  const vals=points.map(p=>p.value);
+  const minV=Math.min(...vals), maxV=Math.max(...vals);
+  const vRange=maxV-minV||1;
+  const xS=i=>ML+(i/(points.length-1||1))*cW;
+  const yS=v=>MT+cH-((v-minV)/vRange)*cH;
+  const pctMetrics={cpu_pct:['cpu_warn','cpu_crit'],mem_pct:['mem_warn','mem_crit'],disk_pct:['disk_warn','disk_crit']};
+  const lineColor = pctMetrics[metric]
+    ? monMetricColor(stats&&stats.avg!=null?stats.avg:vals[vals.length-1], t[pctMetrics[metric][0]], t[pctMetrics[metric][1]])
+    : 'var(--blue)';
+  const poly=points.map((p,i)=>`${xS(i)},${yS(p.value)}`).join(' ');
+  const area=[`${ML},${MT+cH}`,...points.map((p,i)=>`${xS(i)},${yS(p.value)}`),,`${ML+cW},${MT+cH}`].join(' ');
+  let threshLines='';
+  if(pctMetrics[metric]&&t){
+    const [wk,ck]=pctMetrics[metric];
+    const wy=yS(t[wk]),cy=yS(t[ck]);
+    if(wy>=MT&&wy<=MT+cH) threshLines+=`<line x1="${ML}" y1="${wy}" x2="${ML+cW}" y2="${wy}" stroke="var(--yellow)" stroke-width="0.8" stroke-dasharray="4,3" opacity="0.7"/>`;
+    if(cy>=MT&&cy<=MT+cH) threshLines+=`<line x1="${ML}" y1="${cy}" x2="${ML+cW}" y2="${cy}" stroke="var(--red)" stroke-width="0.8" stroke-dasharray="4,3" opacity="0.7"/>`;
+  }
+  const t0=fmtChartTime(points[0].timestamp), tN=fmtChartTime(points[points.length-1].timestamp);
+  container.innerHTML=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:130px;display:block;overflow:visible">
+    <line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+cH}" stroke="var(--border)" stroke-width="1"/>
+    <line x1="${ML}" y1="${MT+cH}" x2="${ML+cW}" y2="${MT+cH}" stroke="var(--border)" stroke-width="1"/>
+    <line x1="${ML}" y1="${MT}" x2="${ML+cW}" y2="${MT}" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="2,4"/>
+    <line x1="${ML}" y1="${MT+cH/2}" x2="${ML+cW}" y2="${MT+cH/2}" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="2,4"/>
+    <text x="${ML-4}" y="${MT+4}" text-anchor="end" font-size="9" fill="var(--muted)">${maxV.toFixed(1)}</text>
+    <text x="${ML-4}" y="${MT+cH/2+4}" text-anchor="end" font-size="9" fill="var(--muted)">${((minV+maxV)/2).toFixed(1)}</text>
+    <text x="${ML-4}" y="${MT+cH+2}" text-anchor="end" font-size="9" fill="var(--muted)">${minV.toFixed(1)}</text>
+    ${threshLines}
+    <polygon points="${area}" fill="${lineColor}" opacity="0.1"/>
+    <polyline points="${poly}" fill="none" stroke="${lineColor}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+    <text x="${ML}" y="${H-3}" font-size="9" fill="var(--muted)">${t0}</text>
+    <text x="${ML+cW}" y="${H-3}" text-anchor="end" font-size="9" fill="var(--muted)">${tN}</text>
+    <text x="${ML+cW/2}" y="${H-3}" text-anchor="middle" font-size="9" fill="var(--muted)">${points.length} pts</text>
+  </svg>`;
+}
+
+async function loadMonHistoryForDetail(instId){
+  const chartEl=document.getElementById('mon-hist-chart');
+  const statsEl=document.getElementById('mon-hist-stats');
+  if(!chartEl) return;
+  chartEl.innerHTML='<p style="text-align:center;padding:0.75rem;color:var(--muted)"><span class="spinner"></span></p>';
+  statsEl.innerHTML='';
+  const captureMetric=monHistMetric, captureRange=monHistRange;
+  const res=await api(`/api/monitoring/history?instance_id=${instId}&metric=${captureMetric}&range=${captureRange}`);
+  if(monHistInstId!==instId||monHistMetric!==captureMetric||monHistRange!==captureRange) return;
+  if(!res.ok){chartEl.innerHTML=`<p style="color:var(--red);font-size:12px;padding:0.5rem">${esc(res.error)}</p>`;return;}
+  const d=res.data||{};
+  renderHistChart(chartEl,d.points||[],captureMetric,monitorThresholds,d);
+  const unit=captureMetric.includes('_kb')?'KB/s':'%';
+  statsEl.innerHTML = d.min!=null
+    ?`<span>Min: <strong>${d.min}${unit}</strong></span>`+
+      `<span>Avg: <strong>${d.avg}${unit}</strong></span>`+
+      `<span>Max: <strong>${d.max}${unit}</strong></span>`
+    :'<span style="color:var(--muted)">No data recorded yet.</span>';
+}
+
+function switchHistMetric(metric){
+  monHistMetric=metric;
+  document.querySelectorAll('#mon-hist-metric-tabs .btn-hist-tab').forEach(b=>{b.classList.toggle('active',b.dataset.metric===metric);});
+  if(monHistInstId) loadMonHistoryForDetail(monHistInstId);
+}
+
+function switchHistRange(range){
+  monHistRange=range;
+  document.querySelectorAll('#mon-hist-range-tabs .btn-hist-tab').forEach(b=>{b.classList.toggle('active',b.dataset.range===range);});
+  if(monHistInstId) loadMonHistoryForDetail(monHistInstId);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Alert history (monitoring tab section)
+// ──────────────────────────────────────────────────────────────────────────────
+function toggleAlertHistory(){
+  const el=document.getElementById('mon-alert-history-section');
+  if(el.style.display==='none'){el.style.display='';loadAlertHistory();}
+  else el.style.display='none';
+}
+
+async function loadAlertHistory(){
+  const listEl=document.getElementById('mon-ah-list');
+  const summaryEl=document.getElementById('mon-ah-summary');
+  const status=document.getElementById('mon-ah-status').value;
+  listEl.innerHTML='<p class="empty-msg"><span class="spinner"></span></p>';
+  const res=await api(`/api/monitoring/alerts/history?status=${status}&limit=100`);
+  if(!res.ok){listEl.innerHTML=`<p class="empty-msg" style="color:var(--red)">${esc(res.error)}</p>`;return;}
+  const d=res.data||{};
+  summaryEl.textContent=`${d.active_count??0} active · ${d.resolved_count??0} resolved`;
+  const alerts=d.alerts||[];
+  if(!alerts.length){listEl.innerHTML='<p class="empty-msg">No alert history.</p>';return;}
+  listEl.innerHTML=`<table class="mon-ah-table">
+    <thead><tr><th>Instance</th><th>Metric</th><th>Severity</th><th>Value</th><th>Fired</th><th>Duration</th><th>Status</th><th></th></tr></thead>
+    <tbody>${alerts.map(a=>`<tr>
+      <td style="color:var(--accent)">${esc(a.instance_label||a.instance_id)}</td>
+      <td>${esc(a.metric)}</td>
+      <td><span class="badge ${a.severity==='critical'?'badge-critical':'badge-warning'}">${esc(a.severity)}</span></td>
+      <td>${a.value}${a.metric!=='Failed Services'?'%':''}</td>
+      <td style="font-size:11px;color:var(--muted);white-space:nowrap">${fmtDate(a.fired_at)}</td>
+      <td style="font-size:11px;color:var(--muted)">${a.duration_min!=null?a.duration_min+'m':'—'}</td>
+      <td><span class="badge ${a.status==='active'?'badge-running':'badge-done'}">${esc(a.status)}</span></td>
+      <td><button class="btn-sm" style="padding:1px 6px;font-size:10px" onclick="dismissAlert(${a.id})">✕</button></td>
+    </tr>`).join('')}
+    </tbody></table>`;
+}
+
+async function dismissAlert(alertId){
+  await api(`/api/monitoring/alerts/history/${alertId}`,{method:'DELETE'});
+  loadAlertHistory();
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Instance Detail full-screen overlay
 // ──────────────────────────────────────────────────────────────────────────────
 function openMonDetail(id){
+  monHistInstId = null;
+  monHistMetric = 'cpu_pct';
+  monHistRange  = '1h';
+
   const inst = monInstCache[id];
   if(!inst) return;
   const t = monitorThresholds;
@@ -1944,6 +2101,30 @@ function openMonDetail(id){
     ? `${(m.mem_used_mb/1024).toFixed(2)} / ${(m.mem_total_mb/1024).toFixed(2)} GB` : '—';
   const diskGB  = (m.disk_used_kb&&m.disk_total_kb)
     ? `${(m.disk_used_kb/1048576).toFixed(1)} / ${(m.disk_total_kb/1048576).toFixed(1)} GB` : '—';
+
+  // History section (chart filled async)
+  const histSection = `
+    <div class="mon-detail-section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem">
+        <span class="mon-detail-section-title" style="margin:0">Metric History</span>
+        <div style="display:flex;gap:4px;flex-wrap:wrap">
+          <div id="mon-hist-metric-tabs" style="display:flex;gap:2px">
+            <button class="btn-hist-tab active" data-metric="cpu_pct" onclick="switchHistMetric('cpu_pct')">CPU</button>
+            <button class="btn-hist-tab" data-metric="mem_pct" onclick="switchHistMetric('mem_pct')">Mem</button>
+            <button class="btn-hist-tab" data-metric="disk_pct" onclick="switchHistMetric('disk_pct')">Disk</button>
+            <button class="btn-hist-tab" data-metric="net_rx_kb" onclick="switchHistMetric('net_rx_kb')">Net RX</button>
+          </div>
+          <div id="mon-hist-range-tabs" style="display:flex;gap:2px;margin-left:4px">
+            <button class="btn-hist-tab active" data-range="1h" onclick="switchHistRange('1h')">1h</button>
+            <button class="btn-hist-tab" data-range="6h" onclick="switchHistRange('6h')">6h</button>
+            <button class="btn-hist-tab" data-range="24h" onclick="switchHistRange('24h')">24h</button>
+            <button class="btn-hist-tab" data-range="7d" onclick="switchHistRange('7d')">7d</button>
+          </div>
+        </div>
+      </div>
+      <div id="mon-hist-chart"></div>
+      <div id="mon-hist-stats" style="display:flex;gap:1.5rem;font-size:11px;color:var(--muted);margin-top:6px;padding-top:6px;border-top:1px solid var(--border)"></div>
+    </div>`;
 
   // Metrics grid
   const metricsSection = `
@@ -2054,11 +2235,14 @@ function openMonDetail(id){
         </div>`).join('')}
     </div>` : '';
 
-  body.innerHTML = alertsSection + metricsSection + barsSection + svcsSection + procsSection;
+  body.innerHTML = alertsSection + histSection + metricsSection + barsSection + svcsSection + procsSection;
   document.getElementById('mon-detail-overlay').classList.add('open');
+  monHistInstId = id;
+  loadMonHistoryForDetail(id);
 }
 
 function closeMonDetail(){
+  monHistInstId = null;
   document.getElementById('mon-detail-overlay').classList.remove('open');
 }
 

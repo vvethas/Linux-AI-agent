@@ -9,7 +9,7 @@ import re
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -1164,14 +1164,61 @@ def get_monitoring():
                 "metrics": None,
                 "alerts": [],
             })
+            try:
+                db.upsert_uptime_log(iid, "down")
+            except Exception:
+                pass
             offline_count += 1
         else:
             metrics = poll_results.get(iid, {})
-            status, inst_alerts = _compute_health(metrics, thresholds)
-            for a in inst_alerts:
-                a["instance_id"] = iid
-                a["instance_label"] = inst["label"]
-            all_alerts.extend(inst_alerts)
+
+            # Check for an active maintenance window
+            maint = None
+            try:
+                maint = db.get_active_maintenance_window(iid)
+            except Exception:
+                pass
+
+            if maint:
+                status = "maintenance"
+                inst_alerts = []
+            else:
+                status, inst_alerts = _compute_health(metrics, thresholds)
+                for a in inst_alerts:
+                    a["instance_id"] = iid
+                    a["instance_label"] = inst["label"]
+                all_alerts.extend(inst_alerts)
+
+                # Persist alert history
+                active_metrics: set = set()
+                for a in inst_alerts:
+                    try:
+                        db.upsert_alert_history(
+                            iid, inst["label"], a["metric"],
+                            a["severity"], a["value"], a["threshold"],
+                        )
+                    except Exception:
+                        pass
+                    active_metrics.add(a["metric"])
+                try:
+                    db.resolve_stale_alerts(iid, active_metrics)
+                except Exception:
+                    pass
+
+            # Store metrics snapshot
+            m = metrics
+            net_rx_kb = (m.get("net_rx_bytes") or 0) / 1024.0
+            net_tx_kb = (m.get("net_tx_bytes") or 0) / 1024.0
+            try:
+                db.save_metrics_snapshot(
+                    iid,
+                    m.get("cpu_pct"), m.get("mem_pct"), m.get("disk_pct"),
+                    net_rx_kb, net_tx_kb, m.get("load_avg"),
+                )
+                db.upsert_uptime_log(iid, "up")
+            except Exception:
+                pass
+
             if metrics.get("cpu_pct") is not None:
                 cpu_vals.append(metrics["cpu_pct"])
             if metrics.get("mem_pct") is not None:
@@ -1185,6 +1232,12 @@ def get_monitoring():
                 "metrics": metrics,
                 "alerts": inst_alerts,
             })
+
+    # Purge metrics older than 7 days
+    try:
+        db.delete_old_metrics_history()
+    except Exception:
+        pass
 
     summary = {
         "total": len(instances),
@@ -1201,6 +1254,95 @@ def get_monitoring():
         "summary": summary,
         "thresholds": thresholds,
     })
+
+
+@app.route("/api/monitoring/history", methods=["GET"])
+def monitoring_history():
+    instance_id = request.args.get("instance_id")
+    metric = request.args.get("metric", "cpu_pct")
+    range_str = request.args.get("range", "1h")
+
+    if not instance_id:
+        return _err("instance_id required")
+    inst = db.get_instance(int(instance_id))
+    if not inst:
+        return _err("Instance not found", 404)
+
+    range_td_map = {
+        "1h": timedelta(hours=1),
+        "6h": timedelta(hours=6),
+        "24h": timedelta(hours=24),
+        "7d": timedelta(days=7),
+    }
+    cutoff_dt = datetime.now(timezone.utc) - range_td_map.get(range_str, timedelta(hours=1))
+    cutoff = cutoff_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    points = db.get_metrics_history(instance_id, metric, cutoff)
+    values = [p["value"] for p in points if p["value"] is not None]
+
+    return _ok({
+        "points": points,
+        "metric": metric,
+        "min": round(min(values), 1) if values else None,
+        "max": round(max(values), 1) if values else None,
+        "avg": round(sum(values) / len(values), 1) if values else None,
+        "instance_label": inst["label"],
+    })
+
+
+@app.route("/api/monitoring/alerts/history", methods=["GET"])
+def monitoring_alerts_history():
+    instance_id = request.args.get("instance_id") or None
+    status = request.args.get("status", "active")
+    limit = min(int(request.args.get("limit", 100)), 500)
+
+    alerts = db.get_alert_history(instance_id=instance_id, status=status, limit=limit)
+    active_rows = db.get_alert_history(instance_id=instance_id, status="active", limit=1000)
+    resolved_rows = db.get_alert_history(instance_id=instance_id, status="resolved", limit=1000)
+
+    return _ok({
+        "alerts": alerts,
+        "total": len(alerts),
+        "active_count": len(active_rows),
+        "resolved_count": len(resolved_rows),
+    })
+
+
+@app.route("/api/monitoring/alerts/history/<int:alert_id>", methods=["DELETE"])
+def delete_monitoring_alert_history(alert_id):
+    db.delete_alert_history_entry(alert_id)
+    return _ok()
+
+
+@app.route("/api/monitoring/maintenance", methods=["GET"])
+def list_maintenance():
+    instance_id = request.args.get("instance_id")
+    windows = db.list_maintenance_windows(
+        instance_id=int(instance_id) if instance_id else None
+    )
+    return _ok(windows)
+
+
+@app.route("/api/monitoring/maintenance", methods=["POST"])
+def add_maintenance():
+    body = request.json or {}
+    instance_id = body.get("instance_id")
+    start_at = body.get("start_at", "")
+    end_at = body.get("end_at", "")
+    reason = body.get("reason", "")
+    if not instance_id or not start_at or not end_at:
+        return _err("instance_id, start_at, and end_at required")
+    inst, err = _require_instance(instance_id)
+    if err:
+        return err
+    wid = db.add_maintenance_window(instance_id, reason, start_at, end_at)
+    return _ok({"id": wid}), 201
+
+
+@app.route("/api/monitoring/maintenance/<int:window_id>", methods=["DELETE"])
+def delete_maintenance(window_id):
+    db.delete_maintenance_window(window_id)
+    return _ok()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -115,6 +115,70 @@ CREATE TABLE IF NOT EXISTS chat_history (
     pre_text    TEXT,            -- optional <pre> block text
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS metrics_history (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id   TEXT NOT NULL,
+    timestamp     TEXT NOT NULL,
+    cpu_pct       REAL,
+    mem_pct       REAL,
+    disk_pct      REAL,
+    net_rx_kb     REAL,
+    net_tx_kb     REAL,
+    disk_read_kb  REAL,
+    disk_write_kb REAL,
+    load_avg      TEXT,
+    created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mh_instance  ON metrics_history(instance_id);
+CREATE INDEX IF NOT EXISTS idx_mh_timestamp ON metrics_history(timestamp);
+
+CREATE TABLE IF NOT EXISTS alert_history (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id    TEXT NOT NULL,
+    instance_label TEXT NOT NULL,
+    metric         TEXT NOT NULL,
+    severity       TEXT NOT NULL,
+    value          REAL NOT NULL,
+    threshold      REAL NOT NULL,
+    message        TEXT NOT NULL,
+    fired_at       TEXT NOT NULL,
+    resolved_at    TEXT,
+    status         TEXT DEFAULT 'active'
+);
+CREATE INDEX IF NOT EXISTS idx_ah_instance ON alert_history(instance_id);
+CREATE INDEX IF NOT EXISTS idx_ah_status   ON alert_history(status);
+
+CREATE TABLE IF NOT EXISTS custom_alert_rules (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id   TEXT,
+    name          TEXT NOT NULL,
+    metric        TEXT NOT NULL,
+    condition     TEXT NOT NULL,
+    threshold     REAL NOT NULL,
+    duration_min  INTEGER DEFAULT 0,
+    severity      TEXT DEFAULT 'warning',
+    enabled       INTEGER DEFAULT 1,
+    created_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS maintenance_windows (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id TEXT NOT NULL,
+    reason      TEXT,
+    start_at    TEXT NOT NULL,
+    end_at      TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS uptime_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id TEXT NOT NULL,
+    date        TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    checked_at  TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ul_instance_date ON uptime_log(instance_id, date);
 """
 
 
@@ -452,3 +516,174 @@ def dashboard_stats():
             "offline": offline,
             "recent_jobs": [dict(r) for r in recent_jobs],
         }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Metrics history helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ALLOWED_METRICS = frozenset(
+    {"cpu_pct", "mem_pct", "disk_pct", "net_rx_kb", "net_tx_kb",
+     "disk_read_kb", "disk_write_kb"}
+)
+
+
+def save_metrics_snapshot(instance_id, cpu_pct, mem_pct, disk_pct,
+                           net_rx_kb, net_tx_kb, load_avg):
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO metrics_history
+               (instance_id, timestamp, cpu_pct, mem_pct, disk_pct,
+                net_rx_kb, net_tx_kb, load_avg, created_at)
+               VALUES (?, datetime('now'), ?, ?, ?, ?, ?, ?, datetime('now'))""",
+            (str(instance_id), cpu_pct, mem_pct, disk_pct,
+             net_rx_kb, net_tx_kb, load_avg),
+        )
+
+
+def get_metrics_history(instance_id, metric: str, cutoff: str):
+    if metric not in _ALLOWED_METRICS:
+        metric = "cpu_pct"
+    with get_db() as conn:
+        rows = conn.execute(
+            f"""SELECT timestamp, {metric} AS value
+                FROM metrics_history
+                WHERE instance_id=? AND timestamp>=? AND {metric} IS NOT NULL
+                ORDER BY timestamp ASC""",
+            (str(instance_id), cutoff),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def delete_old_metrics_history():
+    with get_db() as conn:
+        conn.execute(
+            "DELETE FROM metrics_history WHERE created_at < datetime('now', '-7 days')"
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Uptime log helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def upsert_uptime_log(instance_id, status: str):
+    with get_db() as conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO uptime_log (instance_id, date, status, checked_at)
+               VALUES (?, date('now'), ?, datetime('now'))""",
+            (str(instance_id), status),
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Alert history helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def upsert_alert_history(instance_id, instance_label, metric, severity, value, threshold):
+    message = f"{metric} is {value} (threshold: {threshold})"
+    with get_db() as conn:
+        existing = conn.execute(
+            """SELECT id FROM alert_history
+               WHERE instance_id=? AND metric=? AND status='active' LIMIT 1""",
+            (str(instance_id), metric),
+        ).fetchone()
+        if not existing:
+            conn.execute(
+                """INSERT INTO alert_history
+                   (instance_id, instance_label, metric, severity, value,
+                    threshold, message, fired_at, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), 'active')""",
+                (str(instance_id), instance_label, metric,
+                 severity, value, threshold, message),
+            )
+
+
+def resolve_stale_alerts(instance_id, active_metrics: set):
+    """Resolve alert_history rows for metrics no longer firing on this instance."""
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, metric FROM alert_history WHERE instance_id=? AND status='active'",
+            (str(instance_id),),
+        ).fetchall()
+        for row in rows:
+            if row["metric"] not in active_metrics:
+                conn.execute(
+                    """UPDATE alert_history
+                       SET status='resolved', resolved_at=datetime('now')
+                       WHERE id=?""",
+                    (row["id"],),
+                )
+
+
+def get_alert_history(instance_id=None, status="active", limit=100):
+    clauses, params = [], []
+    if instance_id is not None:
+        clauses.append("instance_id=?")
+        params.append(str(instance_id))
+    if status != "all":
+        clauses.append("status=?")
+        params.append(status)
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    with get_db() as conn:
+        rows = conn.execute(
+            f"""SELECT *,
+                CAST((julianday(COALESCE(resolved_at, datetime('now')))
+                      - julianday(fired_at)) * 1440 AS INTEGER) AS duration_min
+                FROM alert_history
+                {where}
+                ORDER BY id DESC LIMIT ?""",
+            params + [limit],
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def delete_alert_history_entry(alert_id: int):
+    with get_db() as conn:
+        conn.execute("DELETE FROM alert_history WHERE id=?", (alert_id,))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Maintenance window helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_active_maintenance_window(instance_id):
+    with get_db() as conn:
+        row = conn.execute(
+            """SELECT * FROM maintenance_windows
+               WHERE instance_id=?
+               AND start_at <= datetime('now')
+               AND end_at   >= datetime('now')
+               LIMIT 1""",
+            (str(instance_id),),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def list_maintenance_windows(instance_id=None):
+    with get_db() as conn:
+        if instance_id is not None:
+            rows = conn.execute(
+                "SELECT * FROM maintenance_windows WHERE instance_id=? ORDER BY id DESC",
+                (str(instance_id),),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM maintenance_windows ORDER BY id DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def add_maintenance_window(instance_id, reason, start_at, end_at):
+    with get_db() as conn:
+        cur = conn.execute(
+            """INSERT INTO maintenance_windows
+               (instance_id, reason, start_at, end_at, created_at)
+               VALUES (?, ?, ?, ?, datetime('now'))""",
+            (str(instance_id), reason, start_at, end_at),
+        )
+        return cur.lastrowid
+
+
+def delete_maintenance_window(window_id: int):
+    with get_db() as conn:
+        conn.execute("DELETE FROM maintenance_windows WHERE id=?", (window_id,))
