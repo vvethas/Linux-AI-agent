@@ -881,53 +881,25 @@ async function sendChat(isReplicate=false, srcId=null, tgtId=null){
 
   const data = res.data;
   if(data.type==='action_proposal'){
-    renderActionProposal(data, iid);
+    const intent = data.action?.intent||'';
+    const summary = data.action?.summary||'';
+    const intentColors = {
+      troubleshoot:'var(--yellow)', build:'var(--blue)',
+      configure:'var(--magenta)', explore:'var(--green)'
+    };
+    const color = intentColors[intent]||'var(--accent)';
+    appendMsg('ai',
+      `<span style="font-size:12px;color:${color}">▶ ${esc(intent.toUpperCase())}${summary?' — '+esc(summary):''}</span>`,
+      null, true);
+    saveChatMsg(iid,'ai',`<em>Auto-starting ${esc(intent)}:</em> ${esc(summary)}`);
+    chatJobId=null; chatPlan=null; chatMode=intent;
+    if(intent==='troubleshoot') await startTroubleshoot(iid, summary);
+    else if(intent==='build') await startBuild(iid, summary);
+    else if(intent==='configure') await startConfigure(iid, summary);
+    else await startExplore(iid, summary);
   } else {
     appendMsg('ai', esc(data.reply||''));
   }
-}
-
-function renderActionProposal(data, iid){
-  const intent = data.action?.intent||'';
-  const intentColors = {
-    troubleshoot:'var(--yellow)', build:'var(--blue)',
-    configure:'var(--magenta)', explore:'var(--green)'
-  };
-  const color = intentColors[intent]||'var(--accent)';
-  let html = `<div class="plan-card">
-    <p style="margin-bottom:0.75rem">${esc(data.reply||'')}</p>
-    <p style="font-size:12px;color:${color};margin-bottom:0.75rem">
-      Action: <strong>${esc(intent.toUpperCase())}</strong>
-      ${data.action?.summary?' — '+esc(data.action.summary):''}
-    </p>
-    <div class="action-proposal-btns">
-      <button class="proceed-btn" id="proposal-proceed">Proceed ✓</button>
-      <button class="cancel-btn" id="proposal-cancel">Cancel</button>
-    </div>
-  </div>`;
-  appendMsg('ai', html, null, false);  // don't auto-persist with buttons
-
-  // Wire up the buttons (they only exist in the last AI message)
-  const container = document.getElementById('chat-messages');
-  const lastMsg = container.lastChild;
-  lastMsg.querySelector('#proposal-proceed').onclick = async ()=>{
-    lastMsg.querySelector('.action-proposal-btns').innerHTML =
-      `<span style="color:var(--green);font-size:12px">✓ Proceeding with ${esc(intent)}…</span>`;
-    // Save the AI proposal message now (without interactive buttons)
-    saveChatMsg(iid,'ai',`<em>Action proposed:</em> ${esc(intent)} — ${esc(data.action?.summary||'')}. <em>User confirmed.</em>`);
-    chatJobId=null; chatPlan=null; chatMode=intent;
-    if(intent==='troubleshoot') await startTroubleshoot(iid, data.action?.summary||'');
-    else if(intent==='build') await startBuild(iid, data.action?.summary||'');
-    else if(intent==='configure') await startConfigure(iid, data.action?.summary||'');
-    else await startExplore(iid, data.action?.summary||'');
-  };
-  lastMsg.querySelector('#proposal-cancel').onclick = ()=>{
-    lastMsg.querySelector('.action-proposal-btns').innerHTML =
-      `<span style="color:var(--muted);font-size:12px">Cancelled.</span>`;
-    saveChatMsg(iid,'ai',`<em>Action proposed:</em> ${esc(intent)} — <em>Cancelled by user.</em>`);
-    // Reset LLM context so AI starts fresh
-    api(`/api/chat/reset/${iid}`,{method:'POST'});
-  };
 }
 
 async function startExplore(iid, msg){
@@ -984,6 +956,7 @@ async function startTroubleshoot(iid, msg){
   chatJobId = res.data.job_id;
   chatPlan = res.data.plan;
   renderTroubleshootPlan(chatPlan, chatJobId);
+  await autoRunTroubleshootSteps(chatPlan, chatJobId);
 }
 
 function renderTroubleshootPlan(plan, jobId){
@@ -1036,6 +1009,14 @@ async function runVerify(jobId){
   }
 }
 
+async function autoRunTroubleshootSteps(plan, jobId){
+  for(const step of (plan.steps||[])){
+    const btn = document.querySelector(`#step-${jobId}-${step.id} .step-exec-btn`);
+    if(btn) await execStep(jobId, step.id, btn);
+  }
+  await runVerify(jobId);
+}
+
 async function startBuild(iid, msg){
   appendMsg('system','<span class="spinner"></span> Collecting system specs…');
   const res = await api('/api/build/plan',{method:'POST',body:JSON.stringify({instance_id:iid,message:msg})});
@@ -1046,6 +1027,7 @@ async function startBuild(iid, msg){
   chatJobId = res.data.job_id;
   chatPlan = res.data.plan;
   renderBuildPlan(chatPlan, chatJobId);
+  await autoRunBuildAllSteps(chatPlan, chatJobId);
 }
 
 function renderBuildPlan(plan, jobId){
@@ -1109,6 +1091,16 @@ async function runPostInstall(jobId){
   }
 }
 
+async function autoRunBuildAllSteps(plan, jobId){
+  for(const phase of (plan.phases||[])){
+    for(const step of (phase.steps||[])){
+      const btn = document.querySelector(`#bstep-${jobId}-${phase.id}-${step.id} .step-exec-btn`);
+      if(btn) await execBuildStep(jobId, phase.id, step.id, btn);
+    }
+  }
+  await runPostInstall(jobId);
+}
+
 async function startConfigure(iid, msg){
   appendMsg('system','<span class="spinner"></span> Collecting diagnostics for configuration…');
   const res = await api('/api/configure/plan',{method:'POST',body:JSON.stringify({instance_id:iid,message:msg})});
@@ -1119,6 +1111,7 @@ async function startConfigure(iid, msg){
   chatJobId = res.data.job_id;
   chatPlan = res.data.plan;
   renderConfigurePlan(chatPlan, chatJobId);
+  await autoRunConfigureSteps(chatPlan, chatJobId);
 }
 
 function renderConfigurePlan(plan, jobId){
@@ -1170,6 +1163,14 @@ async function runConfigureVerify(jobId){
   } else {
     appendMsg('system','Verification error: '+esc(res.error));
   }
+}
+
+async function autoRunConfigureSteps(plan, jobId){
+  for(const step of (plan.steps||[])){
+    const btn = document.querySelector(`#cfgstep-${jobId}-${step.id} .step-exec-btn`);
+    if(btn) await execConfigureStep(jobId, step.id, btn);
+  }
+  await runConfigureVerify(jobId);
 }
 
 async function startReplicate(srcId, tgtId, msg){
