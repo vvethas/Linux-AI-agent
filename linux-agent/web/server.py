@@ -1042,7 +1042,13 @@ def _load_thresholds() -> dict:
     if raw:
         try:
             saved = json.loads(raw)
-            return {**_MONITORING_DEFAULTS, **{k: float(v) for k, v in saved.items()}}
+            merged = dict(_MONITORING_DEFAULTS)
+            for k, v in saved.items():
+                try:
+                    merged[k] = float(v)
+                except (TypeError, ValueError):
+                    pass
+            return merged
         except Exception:
             pass
     return dict(_MONITORING_DEFAULTS)
