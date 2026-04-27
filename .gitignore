@@ -1,0 +1,21 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Runtime data / SQLite DB
+linux-agent/data/agent.db
+*.db
+
+# Logs
+*.log
+
+# OS / editor artifacts
+.DS_Store
+*.swp
+*.swo

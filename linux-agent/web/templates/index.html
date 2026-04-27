@@ -1,0 +1,2286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Linux AI Infrastructure Agent</title>
+<style>
+/* ── reset & base ─────────────────────────────────────────────────────────── */
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d0d0d;--surface:#141414;--surface2:#1c1c1c;
+  --accent:#4ec9b0;--magenta:#b87fd4;--green:#4caf50;--red:#e05252;
+  --yellow:#e5b840;--blue:#5b9bd5;--muted:#888;--border:#222;
+  --text:#e0e0e0;--text2:#ccc;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);
+  font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;font-size:14px}
+a{color:var(--accent);text-decoration:none}
+button{cursor:pointer;border:none;outline:none;border-radius:4px}
+input,select,textarea{background:var(--surface2);border:1px solid var(--border);
+  color:var(--text);border-radius:4px;padding:6px 10px;font-size:13px;width:100%}
+input:focus,select:focus,textarea:focus{outline:1px solid var(--accent)}
+label{display:block;margin-bottom:3px;color:var(--muted);font-size:12px}
+pre,code{font-family:ui-monospace,SFMono-Regular,monospace}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:#333;border-radius:3px}
+
+/* ── layout ──────────────────────────────────────────────────────────────── */
+#app{display:flex;flex-direction:column;height:100vh}
+#header{background:var(--surface);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;padding:0 1rem;gap:1rem;flex-shrink:0}
+#header h1{color:var(--accent);font-size:1rem;white-space:nowrap;margin-right:0.5rem}
+.nav-tabs{display:flex;gap:0;flex:1}
+.nav-tab{padding:14px 18px;color:var(--muted);background:none;border:none;
+  border-bottom:2px solid transparent;font-size:13px;cursor:pointer;white-space:nowrap;
+  transition:color .15s}
+.nav-tab:hover{color:var(--text)}
+.nav-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+#body{display:flex;flex:1;overflow:hidden}
+
+/* ── sidebar ─────────────────────────────────────────────────────────────── */
+#sidebar{width:220px;background:var(--surface);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;flex-shrink:0;overflow:hidden}
+#sidebar-header{padding:10px 12px;display:flex;align-items:center;justify-content:space-between;
+  border-bottom:1px solid var(--border)}
+#sidebar-header span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+#btn-add-instance{background:var(--accent);color:#000;padding:3px 10px;font-size:12px;
+  border-radius:3px;font-weight:600}
+#instance-list{overflow-y:auto;flex:1}
+.inst-item{padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;
+  display:flex;align-items:center;gap:6px;transition:background .1s}
+.inst-item:hover,.inst-item.selected{background:var(--surface2)}
+.status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.dot-online{background:var(--green)}
+.dot-offline{background:var(--red)}
+.dot-auth_error{background:var(--yellow)}
+.dot-unknown{background:var(--muted)}
+.inst-name{font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inst-actions{display:flex;gap:4px;flex-shrink:0}
+.inst-action-btn{background:none;color:var(--muted);font-size:14px;padding:2px 4px;
+  border-radius:2px;line-height:1}
+.inst-action-btn:hover{color:var(--accent);background:var(--surface2)}
+
+/* ── main content ─────────────────────────────────────────────────────────── */
+#main{flex:1;overflow:auto;padding:1.25rem}
+
+/* ── tab panes ───────────────────────────────────────────────────────────── */
+.tab-pane{display:none}
+.tab-pane.active{display:block}
+
+/* ── dashboard ───────────────────────────────────────────────────────────── */
+.stat-cards{display:flex;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;
+  padding:1rem 1.5rem;min-width:130px;text-align:center}
+.stat-val{font-size:2rem;font-weight:700}
+.stat-label{font-size:11px;color:var(--muted);margin-top:2px}
+.inst-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem;
+  margin-bottom:1.5rem}
+.inst-tile{background:var(--surface);border:1px solid var(--border);border-radius:6px;
+  padding:1rem;display:flex;flex-direction:column;gap:0.5rem}
+.tile-top{display:flex;align-items:center;gap:0.75rem}
+.score-ring{width:48px;height:48px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-size:1rem;font-weight:700;flex-shrink:0;border:3px solid var(--border)}
+.tile-info{flex:1;min-width:0}
+.tile-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile-role{font-size:11px;color:var(--muted)}
+.tile-btns{display:flex;gap:6px;flex-wrap:wrap}
+.tile-btn{font-size:11px;padding:4px 10px;border-radius:3px;background:var(--surface2);
+  color:var(--text2);border:1px solid var(--border)}
+.tile-btn:hover{background:var(--accent);color:#000;border-color:var(--accent)}
+.activity-feed{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:1rem}
+.activity-feed h3{color:var(--accent);margin-bottom:0.75rem;font-size:13px}
+.activity-item{display:flex;gap:0.75rem;padding:6px 0;border-bottom:1px solid var(--border);
+  font-size:12px;align-items:center}
+.activity-item:last-child{border-bottom:none}
+.badge{padding:2px 8px;border-radius:3px;font-size:11px;font-weight:700}
+.badge-done{background:#1b3a1b;color:var(--green)}
+.badge-failed{background:#3a1b1b;color:var(--red)}
+.badge-running{background:#1b2e3a;color:var(--blue)}
+.badge-pending{background:#2a2a1b;color:var(--yellow)}
+
+/* ── chat ─────────────────────────────────────────────────────────────────── */
+#chat-container{display:flex;flex-direction:column;height:calc(100vh - 160px)}
+#chat-messages{flex:1;overflow-y:auto;padding:0.5rem 0;display:flex;flex-direction:column;gap:0.75rem}
+.msg{max-width:90%;padding:10px 14px;border-radius:6px;line-height:1.5;font-size:13px}
+.msg-user{background:var(--surface2);align-self:flex-end;color:var(--text)}
+.msg-ai{background:#0f1f1a;border:1px solid #1a3a30;align-self:flex-start;color:var(--text2)}
+.msg-system{background:var(--surface);border:1px solid var(--border);align-self:center;
+  color:var(--muted);font-size:12px}
+.msg-pre{background:#0d0d0d;border:1px solid var(--border);border-radius:4px;
+  padding:8px;margin-top:6px;overflow-x:auto;font-size:12px;white-space:pre-wrap;
+  color:var(--accent)}
+#chat-input-row{display:flex;gap:8px;margin-top:0.75rem;align-items:flex-end}
+#chat-input{flex:1;resize:none;height:60px;font-family:inherit}
+#chat-send{background:var(--accent);color:#000;padding:0 20px;font-weight:700;border-radius:4px;height:60px}
+#chat-clear{background:transparent;color:var(--muted);border:1px solid var(--border);padding:0 12px;font-size:12px;border-radius:4px}
+#chat-clear:hover{color:var(--red);border-color:var(--red)}
+#chat-attach-btn{display:flex;align-items:center;justify-content:center;width:38px;height:60px;
+  background:transparent;border:1px solid var(--border);border-radius:4px;cursor:pointer;
+  font-size:18px;color:var(--muted);flex-shrink:0}
+#chat-attach-btn:hover{border-color:var(--accent);color:var(--accent)}
+#attach-preview{display:flex;align-items:center;gap:6px;padding:4px 8px;
+  background:var(--surface);border:1px solid var(--border);border-radius:4px;
+  font-size:12px;color:var(--accent);margin-top:6px}
+#attach-preview img{max-height:48px;max-width:80px;border-radius:3px;object-fit:cover}
+.attach-remove{background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;padding:0 2px;line-height:1}
+.msg-history{opacity:0.72}
+.plan-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;
+  padding:1rem;margin-top:0.5rem}
+.plan-card h4{color:var(--accent);margin-bottom:0.5rem}
+.step-row{display:flex;align-items:center;gap:8px;padding:6px 0;
+  border-bottom:1px solid var(--border)}
+.step-row:last-child{border-bottom:none}
+.step-title{flex:1;font-size:13px}
+.risky-badge{background:#3a1b1b;color:var(--red);padding:1px 6px;border-radius:3px;
+  font-size:11px}
+.step-exec-btn{background:var(--accent);color:#000;padding:4px 14px;font-size:12px;
+  font-weight:600;border-radius:3px}
+.step-exec-btn:disabled{background:var(--border);color:var(--muted);cursor:not-allowed}
+.step-output{background:#0d0d0d;border:1px solid var(--border);border-radius:4px;
+  padding:8px;margin-top:4px;font-size:12px;white-space:pre-wrap;color:var(--text2);
+  max-height:200px;overflow-y:auto}
+.phase-header{color:var(--magenta);font-weight:700;margin:0.75rem 0 0.25rem;font-size:13px}
+.approve-btn{background:var(--green);color:#000;padding:6px 18px;font-weight:700;
+  border-radius:4px;margin-top:0.5rem}
+.verify-btn{background:var(--blue);color:#fff;padding:6px 18px;font-weight:700;
+  border-radius:4px;margin-top:0.5rem}
+.confirm-row{display:flex;gap:8px;align-items:center;margin-top:4px;padding:6px 0}
+.confirm-yes{background:var(--green);color:#000;padding:3px 14px;font-size:12px;font-weight:700;border-radius:3px}
+.confirm-no{background:#3a1b1b;color:var(--red);padding:3px 14px;font-size:12px;font-weight:700;border-radius:3px}
+.action-proposal-btns{display:flex;gap:8px;margin-top:0.75rem}
+.proceed-btn{background:var(--green);color:#000;padding:6px 20px;font-weight:700;border-radius:4px}
+.cancel-btn{background:transparent;color:var(--muted);border:1px solid var(--border);padding:6px 14px;border-radius:4px}
+
+/* ── jobs ─────────────────────────────────────────────────────────────────── */
+.filter-row{display:flex;gap:0.75rem;margin-bottom:1rem;align-items:flex-end;flex-wrap:wrap}
+.filter-row label{color:var(--muted);font-size:12px;margin-bottom:2px}
+.filter-row select,.filter-row input{width:160px}
+.jobs-table-wrap{overflow-x:auto}
+table.data-table{width:100%;border-collapse:collapse;font-size:13px}
+table.data-table th{background:var(--surface2);color:var(--muted);text-align:left;
+  padding:8px 10px;border-bottom:2px solid var(--border);white-space:nowrap}
+table.data-table td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+table.data-table tr:hover td{background:var(--surface)}
+.job-link{color:var(--accent);cursor:pointer}
+.job-link:hover{text-decoration:underline}
+
+/* ── side panel ───────────────────────────────────────────────────────────── */
+#side-panel{position:fixed;right:0;top:0;bottom:0;width:580px;background:var(--surface);
+  border-left:1px solid var(--border);transform:translateX(100%);
+  transition:transform .25s ease;z-index:1000;display:flex;flex-direction:column}
+#side-panel.open{transform:translateX(0)}
+#panel-header{padding:1rem;border-bottom:1px solid var(--border);display:flex;
+  align-items:center;justify-content:space-between}
+#panel-title{font-weight:600;color:var(--accent)}
+#panel-close{background:none;color:var(--muted);font-size:18px;padding:0 4px}
+#panel-close:hover{color:var(--text)}
+#panel-body{flex:1;overflow-y:auto;padding:1rem}
+.step-detail{background:var(--surface2);border-radius:4px;padding:0.75rem;margin-bottom:0.75rem}
+.step-detail-title{font-weight:600;margin-bottom:4px;font-size:13px}
+.step-detail-cmds{font-family:monospace;font-size:11px;color:var(--accent);
+  background:#0d0d0d;padding:4px 8px;border-radius:3px;margin-bottom:6px;white-space:pre-wrap}
+.step-detail-output{font-family:monospace;font-size:11px;color:var(--text2);
+  background:#0d0d0d;padding:6px 8px;border-radius:3px;white-space:pre-wrap;
+  max-height:300px;overflow-y:auto}
+
+/* ── study reports ───────────────────────────────────────────────────────── */
+.study-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;
+  padding:1rem;margin-bottom:0.75rem;display:flex;align-items:center;gap:1rem}
+.study-info{flex:1}
+.study-actions{display:flex;gap:8px}
+.btn-sm{padding:4px 12px;font-size:12px;border-radius:3px;background:var(--surface2);
+  color:var(--text2);border:1px solid var(--border)}
+.btn-sm:hover{background:var(--accent);color:#000;border-color:var(--accent)}
+.btn-danger{background:#3a1b1b;color:var(--red);border-color:#5a2b2b}
+.btn-danger:hover{background:var(--red);color:#fff}
+
+/* ── alerts & schedule ───────────────────────────────────────────────────── */
+.settings-section{background:var(--surface);border:1px solid var(--border);
+  border-radius:6px;padding:1.25rem;margin-bottom:1rem}
+.settings-section h3{color:var(--accent);margin-bottom:1rem;font-size:14px}
+.form-row{display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:0.75rem}
+.form-field{flex:1;min-width:180px}
+.toggle-row{display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem}
+.toggle-row label{color:var(--text2);margin:0;font-size:13px;cursor:pointer}
+input[type=checkbox]{width:auto;cursor:pointer}
+.btn-primary{background:var(--accent);color:#000;padding:7px 20px;font-weight:700;
+  border-radius:4px}
+.btn-primary:hover{background:#3ab89a}
+
+/* ── modal ────────────────────────────────────────────────────────────────── */
+#modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;
+  align-items:center;justify-content:center}
+#modal-overlay.open{display:flex}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:1.5rem;width:460px;max-width:95vw;max-height:90vh;overflow-y:auto}
+.modal h2{color:var(--accent);margin-bottom:1.25rem;font-size:1rem}
+.modal-footer{display:flex;justify-content:flex-end;gap:0.75rem;margin-top:1.25rem}
+.btn-cancel{background:var(--surface2);color:var(--text2);padding:7px 18px;border-radius:4px}
+.form-field-full{margin-bottom:0.75rem}
+.inline-msg{font-size:12px;margin-top:4px;padding:4px 8px;border-radius:3px}
+.inline-ok{background:#1b3a1b;color:var(--green)}
+.inline-err{background:#3a1b1b;color:var(--red)}
+
+/* ── misc ─────────────────────────────────────────────────────────────────── */
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);
+  border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;
+  vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+.risk-badge{background:#3a1b1b;color:var(--red);padding:1px 6px;border-radius:3px;font-size:11px}
+.section-title{font-size:16px;font-weight:700;margin-bottom:1rem;color:var(--text)}
+h2.section-title{color:var(--accent)}
+.empty-msg{color:var(--muted);font-size:13px;padding:1rem 0}
+
+/* ── monitoring ──────────────────────────────────────────────────────────── */
+.mon-inst-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:1rem;margin-bottom:1rem}
+.mon-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:1rem;display:flex;flex-direction:column;gap:0.5rem}
+.mon-card.unreachable{opacity:.55}
+.mon-card-header{display:flex;align-items:center;gap:0.6rem}
+.mon-card-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.dot-healthy{background:var(--green)}.dot-warning{background:var(--yellow)}
+.dot-critical{background:var(--red)}.dot-unreachable{background:var(--muted)}
+.mon-status-badge{padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;text-transform:uppercase;margin-left:auto;flex-shrink:0}
+.badge-healthy{background:#1b3a1b;color:var(--green)}.badge-warning{background:#2a2a1b;color:var(--yellow)}
+.badge-critical{background:#3a1b1b;color:var(--red)}.badge-unreachable{background:#1e1e1e;color:var(--muted)}
+.mon-metrics-row{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin:4px 0}
+.mon-metric{background:var(--surface2);border-radius:4px;padding:5px 6px;text-align:center}
+.mon-metric-val{font-size:13px;font-weight:700}.mon-metric-lbl{font-size:10px;color:var(--muted);margin-top:1px}
+.mon-bars{display:flex;flex-direction:column;gap:5px}
+.mon-bar-row{display:flex;align-items:center;gap:6px;font-size:11px}
+.mon-bar-label{width:36px;color:var(--muted);flex-shrink:0}
+.mon-bar-track{flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+.mon-bar-fill{height:100%;border-radius:3px;transition:width .4s}.mon-bar-pct{width:36px;text-align:right;color:var(--text2)}
+.mon-svcs{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
+.svc-pill{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600}
+.svc-active{background:#1b3a1b;color:var(--green)}.svc-inactive{background:#1e1e1e;color:var(--muted)}
+.mon-proc-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}
+.mon-proc-title{font-size:10px;color:var(--muted);margin-bottom:2px}
+.mon-proc-table{font-size:11px;width:100%;border-collapse:collapse}
+.mon-proc-table td{padding:2px 4px;border-bottom:1px solid var(--border)}
+.mon-proc-table td:first-child{color:var(--accent);font-family:monospace;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mon-proc-table td:last-child{text-align:right;color:var(--muted);white-space:nowrap}
+.mon-card-footer{display:flex;gap:1rem;font-size:11px;color:var(--muted);border-top:1px solid var(--border);padding-top:6px;margin-top:2px;flex-wrap:wrap}
+.mon-alerts-banner{background:#3a1b1b;border:1px solid #5a2b2b;border-radius:6px;padding:0.75rem 1rem;margin-bottom:1rem}
+.mon-alerts-banner h4{color:var(--red);margin-bottom:0.5rem;font-size:13px}
+.mon-alert-item{display:flex;gap:0.75rem;align-items:center;padding:3px 0;font-size:12px;border-bottom:1px solid #5a2b2b}
+.mon-alert-item:last-child{border-bottom:none}
+.mon-footer-bar{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:0.6rem 1rem;display:flex;align-items:center;gap:1.5rem;font-size:12px;color:var(--muted);flex-wrap:wrap;margin-top:0.5rem}
+.mon-footer-bar code{color:var(--accent)}
+.unreachable-msg{font-size:12px;color:var(--red);font-style:italic;padding:4px 0}
+.failed-svc-warn{color:var(--red);font-size:11px;font-weight:600;margin-top:2px}
+.modal-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;align-items:center;justify-content:center}
+.modal-backdrop.open{display:flex}
+.mon-card{cursor:pointer}
+.mon-card:hover{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+#mon-detail-overlay{display:none;position:fixed;inset:0;background:var(--bg);z-index:3000;flex-direction:column;overflow:hidden}
+#mon-detail-overlay.open{display:flex}
+#mon-detail-header{background:var(--surface);border-bottom:1px solid var(--border);padding:0.85rem 1.25rem;display:flex;align-items:center;gap:0.75rem;flex-shrink:0}
+#mon-detail-close{background:none;color:var(--muted);font-size:20px;padding:0 6px;margin-left:auto;line-height:1}
+#mon-detail-close:hover{color:var(--text)}
+#mon-detail-body{flex:1;overflow-y:auto;padding:1.5rem;display:flex;flex-direction:column;gap:1.25rem}
+.mon-detail-section{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:1rem}
+.mon-detail-section-title{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:0.75rem}
+.mon-detail-metrics-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:0.75rem}
+.mon-detail-metric{background:var(--surface2);border-radius:5px;padding:0.75rem;text-align:center}
+.mon-detail-metric-val{font-size:1.5rem;font-weight:700;line-height:1}
+.mon-detail-metric-lbl{font-size:11px;color:var(--muted);margin-top:4px}
+.mon-detail-bar-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:12px}
+.mon-detail-bar-label{width:52px;color:var(--muted)}
+.mon-detail-bar-track{flex:1;height:10px;background:var(--border);border-radius:5px;overflow:hidden}
+.mon-detail-bar-fill{height:100%;border-radius:5px;transition:width .4s}
+.mon-detail-bar-pct{width:44px;text-align:right;font-weight:600}
+.mon-detail-svc-grid{display:flex;flex-wrap:wrap;gap:6px}
+.mon-detail-svc-pill{padding:3px 12px;border-radius:10px;font-size:11px;font-weight:600}
+.mon-detail-procs{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+.mon-detail-proc-title{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+.mon-detail-proc-table{width:100%;border-collapse:collapse;font-size:12px}
+.mon-detail-proc-table td{padding:4px 6px;border-bottom:1px solid var(--border)}
+.mon-detail-proc-table td:first-child{color:var(--accent);font-family:monospace;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mon-detail-proc-table td:last-child{text-align:right;color:var(--muted);white-space:nowrap}
+.dot-maintenance{background:var(--blue)}.badge-maintenance{background:#0d2a3a;color:var(--blue)}
+.btn-hist-tab{background:var(--surface2);color:var(--muted);border:1px solid var(--border);border-radius:3px;padding:2px 7px;font-size:11px;cursor:pointer}
+.btn-hist-tab.active,.btn-hist-tab:hover{background:var(--accent);color:#000;border-color:var(--accent)}
+.mon-ah-table{width:100%;border-collapse:collapse;font-size:12px}
+.mon-ah-table th{padding:5px 8px;border-bottom:1px solid var(--border);color:var(--muted);font-weight:500;text-align:left;font-size:11px;white-space:nowrap}
+.mon-ah-table td{padding:5px 8px;border-bottom:1px solid var(--border);vertical-align:middle}
+.mon-ah-table tr:last-child td{border-bottom:none}
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- ── Header ───────────────────────────────────────────────────────────── -->
+<div id="header">
+  <h1>⚡ Linux AI Agent</h1>
+  <div class="nav-tabs">
+    <button class="nav-tab active" data-tab="dashboard">Dashboard</button>
+    <button class="nav-tab" data-tab="chat">Chat</button>
+    <button class="nav-tab" data-tab="jobs">Job History</button>
+    <button class="nav-tab" data-tab="studies">Study Reports</button>
+    <button class="nav-tab" data-tab="alerts">Alerts &amp; Schedule</button>
+    <button class="nav-tab" data-tab="monitoring">Monitoring</button>
+  </div>
+</div>
+
+<div id="body">
+
+<!-- ── Sidebar ──────────────────────────────────────────────────────────── -->
+<div id="sidebar">
+  <div id="sidebar-header">
+    <span>Instances</span>
+    <button id="btn-add-instance">+ Add</button>
+  </div>
+  <div id="instance-list"></div>
+</div>
+
+<!-- ── Main ─────────────────────────────────────────────────────────────── -->
+<div id="main">
+
+  <!-- Dashboard tab -->
+  <div id="tab-dashboard" class="tab-pane active">
+    <div class="stat-cards" id="stat-cards">
+      <div class="stat-card"><div class="stat-val" id="stat-total">—</div><div class="stat-label">Total Instances</div></div>
+      <div class="stat-card"><div class="stat-val" style="color:var(--green)" id="stat-online">—</div><div class="stat-label">Online</div></div>
+      <div class="stat-card"><div class="stat-val" style="color:var(--red)" id="stat-offline">—</div><div class="stat-label">Offline</div></div>
+      <div class="stat-card"><div class="stat-val" style="color:var(--accent)" id="stat-avg">—</div><div class="stat-label">Avg Health</div></div>
+    </div>
+    <div class="inst-grid" id="inst-grid"></div>
+    <div class="activity-feed">
+      <h3>Recent Activity</h3>
+      <div id="activity-list"></div>
+    </div>
+  </div>
+
+  <!-- Chat tab -->
+  <div id="tab-chat" class="tab-pane">
+    <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem">
+      <span style="font-size:13px;color:var(--muted)">Instance:</span>
+      <select id="chat-instance-select" style="width:200px"></select>
+      <button id="chat-clear">Clear History</button>
+    </div>
+    <div id="chat-container">
+      <div id="chat-messages"></div>
+      <div id="attach-preview" style="display:none"></div>
+      <div id="chat-input-row">
+        <label id="chat-attach-btn" title="Attach image or text file">
+          📎
+          <input type="file" id="chat-attach-input" style="display:none"
+            accept="image/png,image/jpeg,image/gif,image/webp,.txt,.log,.conf,.yaml,.yml,.json,.md,.sh"
+            onchange="handleAttachSelect(this)"/>
+        </label>
+        <textarea id="chat-input" placeholder="Describe your issue or deployment goal…"></textarea>
+        <button id="chat-send">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Jobs tab -->
+  <div id="tab-jobs" class="tab-pane">
+    <h2 class="section-title">Job History</h2>
+    <div class="filter-row">
+      <div><label>Instance</label><select id="job-filter-instance"><option value="">All</option></select></div>
+      <div><label>Type</label>
+        <select id="job-filter-type">
+          <option value="">All</option>
+          <option value="troubleshoot">Troubleshoot</option>
+          <option value="build">Build</option>
+          <option value="study">Study</option>
+          <option value="replicate">Replicate</option>
+        </select>
+      </div>
+      <button class="btn-sm" onclick="loadJobs()">Refresh</button>
+    </div>
+    <div class="jobs-table-wrap">
+      <table class="data-table">
+        <thead><tr>
+          <th>#</th><th>Instance</th><th>Type</th><th>Title</th>
+          <th>Status</th><th>Started</th><th>Duration</th><th></th>
+        </tr></thead>
+        <tbody id="jobs-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Studies tab -->
+  <div id="tab-studies" class="tab-pane">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <h2 class="section-title" style="margin:0">Study Reports</h2>
+      <select id="study-filter-instance" style="width:200px">
+        <option value="">All Instances</option>
+      </select>
+    </div>
+    <div id="studies-list"></div>
+  </div>
+
+  <!-- Alerts & Schedule tab -->
+  <div id="tab-alerts" class="tab-pane">
+    <div style="display:flex;gap:1.5rem;flex-wrap:wrap">
+
+      <!-- Notification settings -->
+      <div style="flex:1;min-width:320px">
+        <div class="settings-section">
+          <h3>Slack Notifications</h3>
+          <div class="form-field-full">
+            <label>Webhook URL</label>
+            <input type="text" id="cfg-slack-webhook" placeholder="https://hooks.slack.com/…"/>
+          </div>
+          <div class="toggle-row"><input type="checkbox" id="cfg-enabled"><label for="cfg-enabled">Notifications enabled</label></div>
+          <div class="toggle-row"><input type="checkbox" id="cfg-notify-jobs"><label for="cfg-notify-jobs">Notify on all jobs</label></div>
+          <div class="toggle-row"><input type="checkbox" id="cfg-notify-studies"><label for="cfg-notify-studies">Notify on all studies</label></div>
+          <div class="toggle-row"><input type="checkbox" id="cfg-notify-unreachable"><label for="cfg-notify-unreachable">Notify when instance unreachable</label></div>
+          <div class="toggle-row"><input type="checkbox" id="cfg-alert-failed-svcs"><label for="cfg-alert-failed-svcs">Alert on failed services</label></div>
+          <div class="form-field-full" style="margin-top:0.5rem">
+            <label>Alert when health score below</label>
+            <input type="number" id="cfg-score-below" value="70" min="0" max="100" style="width:80px"/>
+          </div>
+        </div>
+        <div class="settings-section">
+          <h3>Email (SMTP)</h3>
+          <div class="form-row">
+            <div class="form-field"><label>SMTP Host</label><input type="text" id="cfg-smtp-host"/></div>
+            <div class="form-field"><label>Port</label><input type="number" id="cfg-smtp-port" value="587" style="width:80px"/></div>
+          </div>
+          <div class="form-row">
+            <div class="form-field"><label>Username</label><input type="text" id="cfg-smtp-user"/></div>
+            <div class="form-field"><label>Password</label><input type="password" id="cfg-smtp-pass"/></div>
+          </div>
+          <div class="form-row">
+            <div class="form-field"><label>From</label><input type="email" id="cfg-email-from"/></div>
+            <div class="form-field"><label>To</label><input type="email" id="cfg-email-to"/></div>
+          </div>
+          <div class="toggle-row"><input type="checkbox" id="cfg-smtp-tls" checked><label for="cfg-smtp-tls">Use STARTTLS</label></div>
+          <div style="display:flex;gap:0.75rem;margin-top:0.75rem">
+            <button class="btn-primary" onclick="saveNotifyConfig()">Save</button>
+            <button class="btn-sm" onclick="testNotify()">Test</button>
+          </div>
+          <div id="notify-msg" style="margin-top:6px"></div>
+        </div>
+      </div>
+
+      <!-- Per-instance schedules -->
+      <div style="flex:1;min-width:320px">
+        <div class="settings-section">
+          <h3>Scheduled Health Checks</h3>
+          <div class="form-field-full" style="margin-bottom:0.75rem">
+            <label>Instance</label>
+            <select id="sched-instance-select" style="width:100%"></select>
+          </div>
+          <div class="toggle-row"><input type="checkbox" id="sched-enabled"><label for="sched-enabled">Enabled</label></div>
+          <div class="form-field-full" style="margin-top:0.5rem">
+            <label>Mode</label>
+            <select id="sched-mode">
+              <option value="interval">Every N hours</option>
+              <option value="cron">Cron expression</option>
+            </select>
+          </div>
+          <div class="form-field-full" style="margin-top:0.5rem" id="sched-interval-row">
+            <label>Interval (hours)</label>
+            <input type="number" id="sched-hours" value="6" min="0.5" step="0.5" style="width:100px"/>
+          </div>
+          <div class="form-field-full" style="margin-top:0.5rem;display:none" id="sched-cron-row">
+            <label>Cron expression</label>
+            <input type="text" id="sched-cron" placeholder="0 */6 * * *"/>
+          </div>
+          <div style="display:flex;gap:0.75rem;margin-top:0.75rem">
+            <button class="btn-primary" onclick="saveSchedule()">Save Schedule</button>
+            <button class="btn-sm" onclick="deleteSchedule()">Remove</button>
+          </div>
+          <div id="sched-msg" style="margin-top:6px"></div>
+        </div>
+        <div class="settings-section">
+          <h3>Active Scheduler Jobs</h3>
+          <div id="scheduler-jobs-list" style="font-size:12px;color:var(--muted)"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Monitoring tab -->
+  <div id="tab-monitoring" class="tab-pane">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+      <h2 class="section-title" style="margin:0">Real-time Monitoring</h2>
+      <div style="display:flex;gap:0.75rem;align-items:center">
+        <span id="mon-last-poll" style="font-size:12px;color:var(--muted)"></span>
+        <button class="btn-sm" onclick="loadMonitoring()">↻ Refresh</button>
+        <button class="btn-sm" onclick="openThresholdModal()">⚙ Thresholds</button>
+        <button class="btn-sm" onclick="toggleAlertHistory()">📋 Alert History</button>
+      </div>
+    </div>
+    <div class="stat-cards" id="mon-stat-cards">
+      <div class="stat-card"><div class="stat-val" id="mon-total">—</div><div class="stat-label">Monitored</div></div>
+      <div class="stat-card"><div class="stat-val" id="mon-avg-cpu">—</div><div class="stat-label">Avg CPU %</div></div>
+      <div class="stat-card"><div class="stat-val" id="mon-avg-mem">—</div><div class="stat-label">Avg Memory %</div></div>
+      <div class="stat-card"><div class="stat-val" id="mon-alert-count" style="color:var(--red)">—</div><div class="stat-label">Active Alerts</div></div>
+    </div>
+    <div id="mon-alerts-banner" style="display:none" class="mon-alerts-banner">
+      <h4>⚠ Active Alerts</h4>
+      <div id="mon-alerts-list"></div>
+    </div>
+    <div id="mon-inst-grid" class="mon-inst-grid"></div>
+    <div id="mon-alert-history-section" style="display:none;margin-bottom:1rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem">
+        <h3 style="font-size:13px;font-weight:600;color:var(--text)">Alert History</h3>
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <select id="mon-ah-status" onchange="loadAlertHistory()" style="width:auto;padding:3px 8px;font-size:12px">
+            <option value="all">All</option>
+            <option value="active">Active</option>
+            <option value="resolved">Resolved</option>
+          </select>
+          <button class="btn-sm" onclick="loadAlertHistory()">↻</button>
+        </div>
+      </div>
+      <div id="mon-ah-list"></div>
+      <div id="mon-ah-summary" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
+    </div>
+    <div class="mon-footer-bar">
+      <span>Auto-refresh: <code>30s</code></span>
+      <span id="mon-thresholds-display"></span>
+    </div>
+  </div>
+
+</div><!-- /main -->
+</div><!-- /body -->
+</div><!-- /app -->
+
+<!-- ── Instance Detail Full-Screen Overlay ───────────────────────────────── -->
+<div id="mon-detail-overlay">
+  <div id="mon-detail-header">
+    <div id="mon-detail-dot" class="mon-card-dot"></div>
+    <span id="mon-detail-title" style="font-size:1rem;font-weight:700;color:var(--text)"></span>
+    <span id="mon-detail-host" style="font-size:12px;color:var(--muted)"></span>
+    <span id="mon-detail-badge" class="mon-status-badge"></span>
+    <button id="mon-detail-close" onclick="closeMonDetail()" title="Close (Esc)">✕</button>
+  </div>
+  <div id="mon-detail-body"></div>
+</div>
+
+<!-- ── Side panel ────────────────────────────────────────────────────────── -->
+<div id="side-panel">
+  <div id="panel-header">
+    <span id="panel-title">Job Details</span>
+    <button id="panel-close" onclick="closePanel()">✕</button>
+  </div>
+  <div id="panel-body"></div>
+</div>
+
+<!-- ── Add Instance Modal ─────────────────────────────────────────────────── -->
+<div id="modal-overlay">
+  <div class="modal">
+    <h2>Add Instance</h2>
+    <div class="form-field-full"><label>Label</label><input id="m-label" placeholder="e.g. prod-openstack-01"/></div>
+    <div class="form-row">
+      <div class="form-field"><label>Host / IP</label><input id="m-host" placeholder="192.168.1.100"/></div>
+      <div class="form-field"><label>Port</label><input id="m-port" value="22" type="number" style="width:80px"/></div>
+    </div>
+    <div class="form-field-full"><label>Username</label><input id="m-user" placeholder="root"/></div>
+    <div class="form-field-full">
+      <label>Auth Type</label>
+      <select id="m-auth">
+        <option value="key">SSH Key</option>
+        <option value="password">Password</option>
+      </select>
+    </div>
+    <div class="form-field-full" id="m-key-row">
+      <label>PEM Key File</label>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button type="button" class="btn-sm" onclick="document.getElementById('m-pem-input').click()">Choose .pem file</button>
+        <span id="m-pem-name" style="font-size:13px;color:var(--muted)">No file chosen</span>
+        <input type="file" id="m-pem-input" accept=".pem" style="display:none" onchange="handlePemUpload(this)"/>
+        <input type="hidden" id="m-key"/>
+      </div>
+    </div>
+    <div class="form-field-full" id="m-pass-row" style="display:none"><label>Password</label><input type="password" id="m-pass"/></div>
+    <div class="form-field-full"><label>Tags (comma-separated)</label><input id="m-tags" placeholder="prod, openstack"/></div>
+    <div id="m-test-msg" style="margin-top:6px"></div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn-sm" onclick="testInstanceModal()">Test SSH</button>
+      <button class="btn-primary" onclick="addInstance()">Add Instance</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Threshold Config Modal ────────────────────────────────────────────── -->
+<div id="modal-thresholds-overlay" class="modal-backdrop">
+  <div class="modal">
+    <h2>Monitoring Thresholds</h2>
+    <div class="form-row">
+      <div class="form-field"><label>CPU Warning %</label><input type="number" id="thr-cpu-warn" min="1" max="99" step="1"/></div>
+      <div class="form-field"><label>CPU Critical %</label><input type="number" id="thr-cpu-crit" min="1" max="100" step="1"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-field"><label>Memory Warning %</label><input type="number" id="thr-mem-warn" min="1" max="99" step="1"/></div>
+      <div class="form-field"><label>Memory Critical %</label><input type="number" id="thr-mem-crit" min="1" max="100" step="1"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-field"><label>Disk Warning %</label><input type="number" id="thr-disk-warn" min="1" max="99" step="1"/></div>
+      <div class="form-field"><label>Disk Critical %</label><input type="number" id="thr-disk-crit" min="1" max="100" step="1"/></div>
+    </div>
+    <div id="thr-msg" style="margin-top:6px"></div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeThresholdModal()">Cancel</button>
+      <button class="btn-primary" onclick="saveThresholds()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ──────────────────────────────────────────────────────────────────────────────
+// State
+// ──────────────────────────────────────────────────────────────────────────────
+let instances = [];
+let selectedInstanceId = null;
+let activeTab = 'dashboard';
+let chatJobId = null;
+let chatPlan = null;
+let chatMode = null; // 'troubleshoot'|'build'
+let chatInstanceId = null; // currently active instance for chat
+let chatAttachment = null; // {name, mime, data} — file attached to next send
+let monInstCache = {};   // id → inst data from last monitoring poll
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Utils
+// ──────────────────────────────────────────────────────────────────────────────
+const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const api = (url, opts={}) => {
+  // When body is FormData let the browser set Content-Type (with boundary)
+  const isForm = opts.body instanceof FormData;
+  const headers = isForm ? (opts.headers||{}) : {'Content-Type':'application/json',...(opts.headers||{})};
+  return fetch(url, {...opts, headers}).then(r=>r.json());
+};
+
+function scoreColor(s){
+  if(s==null)return'var(--muted)';
+  if(s>=80)return'var(--green)';
+  if(s>=60)return'var(--yellow)';
+  return'var(--red)';
+}
+
+function statusDotClass(st){
+  return'dot-'+(st||'unknown');
+}
+
+function badgeClass(status){
+  const m={done:'badge-done',failed:'badge-failed',running:'badge-running',pending:'badge-pending'};
+  return'badge '+(m[status]||'badge-pending');
+}
+
+function fmtDate(s){
+  if(!s)return'—';
+  return new Date(s.replace(' ','T')+'Z').toLocaleString();
+}
+
+function fmtDur(sec){
+  if(sec==null)return'—';
+  if(sec<60)return sec.toFixed(0)+'s';
+  return(sec/60).toFixed(1)+'m';
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Tabs
+// ──────────────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.nav-tab').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    stopMonitorPoll();
+    activeTab = btn.dataset.tab;
+    document.querySelectorAll('.nav-tab').forEach(b=>b.classList.toggle('active',b===btn));
+    document.querySelectorAll('.tab-pane').forEach(p=>{
+      p.classList.toggle('active', p.id==='tab-'+activeTab);
+    });
+    if(activeTab==='dashboard')loadDashboard();
+    else if(activeTab==='jobs')loadJobs();
+    else if(activeTab==='studies')loadStudies();
+    else if(activeTab==='alerts'){loadNotifyConfig();loadSchedulerJobs();}
+    else if(activeTab==='monitoring') startMonitorPoll();
+    else if(activeTab==='chat'){
+      const iid=parseInt(document.getElementById('chat-instance-select').value)||null;
+      if(iid&&iid!==chatInstanceId){chatInstanceId=iid;loadChatHistory(iid);}
+    }
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Instances — sidebar
+// ──────────────────────────────────────────────────────────────────────────────
+async function loadInstances(){
+  const res = await api('/api/instances');
+  instances = res.data||[];
+  renderSidebar();
+  populateInstanceSelects();
+}
+
+function renderSidebar(){
+  const el = document.getElementById('instance-list');
+  if(!instances.length){
+    el.innerHTML='<div style="padding:12px;color:var(--muted);font-size:12px">No instances added</div>';
+    return;
+  }
+  el.innerHTML = instances.map(i=>`
+    <div class="inst-item${selectedInstanceId===i.id?' selected':''}" data-id="${i.id}" onclick="selectInstance(${i.id})">
+      <div class="status-dot ${statusDotClass(i.last_status)}"></div>
+      <div class="inst-name">${esc(i.label)}</div>
+      <div class="inst-actions">
+        <button class="inst-action-btn" title="Study" onclick="event.stopPropagation();studyInstance(${i.id})">⊕</button>
+        <button class="inst-action-btn" title="Schedule" onclick="event.stopPropagation();openScheduleFor(${i.id})">⏱</button>
+        <button class="inst-action-btn" title="Remove instance" style="color:var(--red)" onclick="event.stopPropagation();removeInstance(${i.id})">✕</button>
+      </div>
+    </div>`).join('');
+}
+
+function populateInstanceSelects(){
+  ['chat-instance-select','job-filter-instance','study-filter-instance','sched-instance-select'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(!el)return;
+    const hasAll = id==='job-filter-instance'||id==='study-filter-instance';
+    const prev = el.value;
+    el.innerHTML = (hasAll?'<option value="">All</option>':'')+
+      instances.map(i=>`<option value="${i.id}">${esc(i.label)} (${esc(i.host)})</option>`).join('');
+    if(prev) el.value=prev;
+  });
+}
+
+function selectInstance(id){
+  selectedInstanceId = id;
+  renderSidebar();
+}
+
+async function studyInstance(id){
+  selectInstance(id);
+  showTab('studies');
+  const inst = instances.find(i=>i.id===id);
+  appendMsg('system',`Starting deep study of ${inst?.label||id}…`);
+  await api(`/api/instances/${id}/study`,{method:'POST'});
+  appendMsg('system','Study started in background — check Study Reports when complete.');
+}
+
+function openScheduleFor(id){
+  selectInstance(id);
+  showTab('alerts');
+  document.getElementById('sched-instance-select').value=id;
+  loadScheduleFor(id);
+}
+
+function showTab(name){
+  document.querySelectorAll('.nav-tab').forEach(b=>{
+    b.classList.toggle('active', b.dataset.tab===name);
+  });
+  document.querySelectorAll('.tab-pane').forEach(p=>{
+    p.classList.toggle('active', p.id==='tab-'+name);
+  });
+  activeTab=name;
+}
+
+// Modal
+document.getElementById('btn-add-instance').onclick=()=>{
+  document.getElementById('modal-overlay').classList.add('open');
+};
+document.getElementById('m-auth').onchange=function(){
+  document.getElementById('m-key-row').style.display=this.value==='key'?'':'none';
+  document.getElementById('m-pass-row').style.display=this.value==='password'?'':'none';
+};
+function closeModal(){
+  document.getElementById('modal-overlay').classList.remove('open');
+  document.getElementById('m-test-msg').innerHTML='';
+  document.getElementById('m-pem-input').value='';
+  document.getElementById('m-pem-name').textContent='No file chosen';
+  document.getElementById('m-key').value='';
+}
+
+async function handlePemUpload(input){
+  const file = input.files[0];
+  if(!file) return;
+  if(file.size > 16384){
+    document.getElementById('m-pem-name').textContent = 'File too large (max 16 KB for a PEM key)';
+    input.value='';
+    return;
+  }
+  document.getElementById('m-pem-name').textContent = 'Uploading…';
+  const fd = new FormData();
+  fd.append('file', file);
+  try{
+    const r = await fetch('/api/upload_key',{method:'POST',body:fd});
+    let res;
+    try{ res = await r.json(); } catch(_){ res = {ok:false, error:`Server error (HTTP ${r.status})`}; }
+    if(!res.ok){
+      document.getElementById('m-pem-name').textContent = 'Upload failed: '+(res.error||'unknown');
+      document.getElementById('m-key').value='';
+    } else {
+      document.getElementById('m-pem-name').textContent = res.data.filename;
+      document.getElementById('m-key').value = res.data.path;
+    }
+  } catch(e){
+    document.getElementById('m-pem-name').textContent = 'Upload error: '+(e.message||e);
+    document.getElementById('m-key').value='';
+  }
+}
+
+async function testInstanceModal(){
+  const data = modalFormData();
+  const res = await api('/api/instances',{method:'POST',body:JSON.stringify({...data,label:'__test__'})});
+  if(!res.ok){setMsg('m-test-msg',res.error,false);return;}
+  const id = res.data.id;
+  const res2 = await api(`/api/instances/${id}/test`,{method:'POST'});
+  await api(`/api/instances/${id}`,{method:'DELETE'});
+  if(res2.data?.ok){setMsg('m-test-msg',`Connected (${res2.data.latency_ms}ms)`,true);}
+  else{setMsg('m-test-msg','SSH failed: '+(res2.data?.error||'unknown'),false);}
+}
+
+function modalFormData(){
+  const tags = document.getElementById('m-tags').value.split(',').map(s=>s.trim()).filter(Boolean);
+  return{
+    label:document.getElementById('m-label').value.trim(),
+    host:document.getElementById('m-host').value.trim(),
+    port:parseInt(document.getElementById('m-port').value)||22,
+    username:document.getElementById('m-user').value.trim(),
+    auth_type:document.getElementById('m-auth').value,
+    key_path:document.getElementById('m-key').value.trim()||null,
+    password:document.getElementById('m-pass').value||null,
+    tags,
+  };
+}
+
+async function addInstance(){
+  const data = modalFormData();
+  if(!data.label||!data.host||!data.username){setMsg('m-test-msg','Label, host, and username required',false);return;}
+  if(data.auth_type==='key'&&!data.key_path){setMsg('m-test-msg','Please upload a .pem key file',false);return;}
+  // Duplicate check: same host + port + username already exists
+  const dup = instances.find(i=>i.host===data.host&&String(i.port)===String(data.port)&&i.username===data.username);
+  if(dup){setMsg('m-test-msg',`Duplicate: instance "${dup.label}" already uses ${data.host}:${data.port} (${data.username})`,false);return;}
+  // Save the instance
+  const res = await api('/api/instances',{method:'POST',body:JSON.stringify(data)});
+  if(!res.ok){setMsg('m-test-msg',res.error,false);return;}
+  const iid = res.data.id;
+  // Test SSH connection — roll back on failure
+  setMsg('m-test-msg','Testing SSH connection…',true);
+  const res2 = await api(`/api/instances/${iid}/test`,{method:'POST'});
+  if(!res2.data?.ok){
+    await api(`/api/instances/${iid}`,{method:'DELETE'});
+    setMsg('m-test-msg','SSH connection failed: '+(res2.data?.error||'unknown'),false);
+    return;
+  }
+  closeModal();
+  await loadInstances();
+  loadDashboard();
+}
+
+async function removeInstance(id){
+  const inst = instances.find(i=>i.id===id);
+  if(!confirm(`Remove instance "${inst?.label||id}"? All associated jobs and history will be deleted.`))return;
+  const res = await api(`/api/instances/${id}`,{method:'DELETE'});
+  if(!res.ok){alert('Failed to remove instance: '+(res.error||'unknown'));return;}
+  if(selectedInstanceId===id) selectedInstanceId=null;
+  await loadInstances();
+  loadDashboard();
+}
+
+function setMsg(id, text, ok){
+  document.getElementById(id).innerHTML=`<div class="inline-msg ${ok?'inline-ok':'inline-err'}">${esc(text)}</div>`;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Dashboard
+// ──────────────────────────────────────────────────────────────────────────────
+async function loadDashboard(){
+  const res = await api('/api/dashboard');
+  const d = res.data||{};
+  document.getElementById('stat-total').textContent=d.total_instances??'—';
+  document.getElementById('stat-online').textContent=d.online??'—';
+  document.getElementById('stat-offline').textContent=d.offline??'—';
+  const inst = d.instances||[];
+  const scores = inst.map(i=>i.health_score).filter(s=>s!=null);
+  const avg = scores.length ? Math.round(scores.reduce((a,b)=>a+b,0)/scores.length) : null;
+  document.getElementById('stat-avg').textContent = avg??'—';
+
+  // Instance grid
+  const grid = document.getElementById('inst-grid');
+  if(!inst.length){grid.innerHTML='<p class="empty-msg">No instances yet.</p>';return;}
+  grid.innerHTML = inst.map(i=>{
+    const sc = i.health_score;
+    const col = scoreColor(sc);
+    return`<div class="inst-tile">
+      <div class="tile-top">
+        <div class="score-ring" style="border-color:${col};color:${col}">${sc??'?'}</div>
+        <div class="tile-info">
+          <div class="tile-name">${esc(i.label)}</div>
+          <div class="tile-role">${esc(i.role||'Unknown role')}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">
+            <span class="status-dot ${statusDotClass(i.last_status)}" style="display:inline-block;margin-right:4px"></span>
+            ${esc(i.last_status||'unknown')}
+            ${i.last_seen?'· '+fmtDate(i.last_seen):''}
+          </div>
+        </div>
+      </div>
+      <div class="tile-btns">
+        <button class="tile-btn" onclick="openChatFor(${i.id})">Chat</button>
+        <button class="tile-btn" onclick="studyInstance(${i.id})">Study</button>
+        <button class="tile-btn" onclick="openReplicateFor(${i.id})">Replicate</button>
+        <button class="tile-btn" onclick="viewLatestReport(${i.id})">Report</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Activity
+  const al = document.getElementById('activity-list');
+  const jobs = d.recent_jobs||[];
+  al.innerHTML = jobs.length ? jobs.map(j=>`
+    <div class="activity-item">
+      <span class="${badgeClass(j.status)}">${esc(j.status)}</span>
+      <span style="color:var(--accent)">${esc(j.instance_label||'')}</span>
+      <span>${esc(j.title)}</span>
+      <span style="color:var(--muted);margin-left:auto;font-size:11px">${fmtDate(j.started_at)}</span>
+    </div>`).join('') : '<div class="empty-msg">No recent activity.</div>';
+}
+
+function openChatFor(id){
+  selectInstance(id);
+  showTab('chat');
+  const sel = document.getElementById('chat-instance-select');
+  sel.value=id;
+  chatInstanceId=id;
+  chatJobId=null; chatPlan=null; chatMode=null;
+  loadChatHistory(id);
+}
+
+async function viewLatestReport(id){
+  const res = await api('/api/studies?instance_id='+id);
+  const studies = res.data||[];
+  if(!studies.length){alert('No study reports for this instance.');return;}
+  window.open('/api/studies/'+studies[0].id+'/html','_blank');
+}
+
+async function openReplicateFor(sourceId){
+  const target = prompt('Enter target instance ID to replicate onto:');
+  if(!target)return;
+  showTab('chat');
+  selectInstance(parseInt(target));
+  document.getElementById('chat-instance-select').value=target;
+  // trigger replicate via chat
+  const fakeMsg = `Replicate instance ${sourceId} onto this instance`;
+  document.getElementById('chat-input').value=fakeMsg;
+  await sendChat(true, sourceId, parseInt(target));
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Chat
+// ──────────────────────────────────────────────────────────────────────────────
+document.getElementById('chat-send').onclick = ()=>sendChat();
+document.getElementById('chat-input').addEventListener('keydown', e=>{
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat();}
+});
+document.getElementById('chat-instance-select').addEventListener('change', async function(){
+  chatInstanceId = parseInt(this.value)||null;
+  chatJobId=null; chatPlan=null; chatMode=null;
+  await loadChatHistory(chatInstanceId);
+});
+document.getElementById('chat-clear').onclick = async function(){
+  if(!chatInstanceId)return;
+  if(!confirm('Clear all chat history for this instance?'))return;
+  await api(`/api/chat_history/${chatInstanceId}`,{method:'DELETE'});
+  await api(`/api/chat/reset/${chatInstanceId}`,{method:'POST'});
+  document.getElementById('chat-messages').innerHTML='';
+  chatJobId=null; chatPlan=null; chatMode=null;
+};
+
+function appendMsg(type, html, preText=null, persist=true){
+  const el = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className=`msg msg-${type}`;
+  div.innerHTML=html;
+  if(preText){
+    const pre=document.createElement('pre');
+    pre.className='msg-pre';
+    pre.textContent=preText;
+    div.appendChild(pre);
+  }
+  el.appendChild(div);
+  el.scrollTop=el.scrollHeight;
+  if(persist && chatInstanceId && !html.includes('spinner')){
+    saveChatMsg(chatInstanceId, type, html, preText||null);
+  }
+}
+
+async function saveChatMsg(iid, role, content, preText=null){
+  try{
+    await api(`/api/chat_history/${iid}`,{method:'POST',body:JSON.stringify({role,content,pre_text:preText})});
+  }catch(e){}
+}
+
+async function loadChatHistory(iid){
+  const el = document.getElementById('chat-messages');
+  el.innerHTML='';
+  if(!iid)return;
+  const res = await api(`/api/chat_history/${iid}`);
+  if(!res.ok||!res.data?.length)return;
+  res.data.forEach(m=>{
+    const div=document.createElement('div');
+    div.className=`msg msg-${m.role} msg-history`;
+    div.innerHTML=m.content;
+    if(m.pre_text){
+      const pre=document.createElement('pre');
+      pre.className='msg-pre';
+      pre.textContent=m.pre_text;
+      div.appendChild(pre);
+    }
+    el.appendChild(div);
+  });
+  el.scrollTop=el.scrollHeight;
+}
+
+async function sendChat(isReplicate=false, srcId=null, tgtId=null){
+  const instSel = document.getElementById('chat-instance-select');
+  const iid = parseInt(isReplicate ? tgtId : instSel.value);
+  if(!iid){appendMsg('system','Please select an instance.',null,false);return;}
+  chatInstanceId = iid;
+
+  const inp = document.getElementById('chat-input');
+  const msg = inp.value.trim();
+  if(!msg && !chatAttachment)return;
+  inp.value='';
+
+  // Show user message, optionally with attachment thumbnail/label
+  let userHtml = msg ? esc(msg) : '';
+  if(chatAttachment){
+    const isImg = chatAttachment.mime.startsWith('image/');
+    const attachHtml = isImg
+      ? `<br><img src="data:${esc(chatAttachment.mime)};base64,${chatAttachment.data}" style="max-height:80px;max-width:200px;border-radius:4px;margin-top:4px">`
+      : `<br><span style="font-size:11px;opacity:0.7">📎 ${esc(chatAttachment.name)}</span>`;
+    userHtml += attachHtml;
+  }
+  appendMsg('user', userHtml);
+
+  if(isReplicate){
+    chatJobId=null; chatPlan=null; chatMode=null;
+    clearAttachment();
+    await startReplicate(srcId, iid, msg);
+    return;
+  }
+
+  // Build request: multipart when attachment present, JSON otherwise
+  let fetchOpts;
+  if(chatAttachment){
+    const fd = new FormData();
+    fd.append('instance_id', iid);
+    fd.append('message', msg || '(see attachment)');
+    fd.append('attach_name', chatAttachment.name);
+    fd.append('attach_mime', chatAttachment.mime);
+    fd.append('attach_data', chatAttachment.data);
+    fetchOpts = {method:'POST', body:fd};
+  } else {
+    fetchOpts = {method:'POST', body:JSON.stringify({instance_id:iid, message:msg})};
+  }
+  clearAttachment();
+
+  // Send to conversational AI — it asks questions or proposes an action
+  appendMsg('system','<span class="spinner"></span> Thinking…',null,false);
+  const res = await api('/api/chat/message', fetchOpts);
+  const msgs = document.getElementById('chat-messages');
+  msgs.removeChild(msgs.lastChild);  // remove spinner
+
+  if(!res.ok){appendMsg('system','Error: '+esc(res.error));return;}
+
+  const data = res.data;
+  if(data.type==='action_proposal'){
+    const intent = data.action?.intent||'';
+    const summary = data.action?.summary||'';
+    const intentColors = {
+      troubleshoot:'var(--yellow)', build:'var(--blue)',
+      configure:'var(--magenta)', explore:'var(--green)'
+    };
+    const color = intentColors[intent]||'var(--accent)';
+    appendMsg('ai',
+      `<span style="font-size:12px;color:${color}">▶ ${esc(intent.toUpperCase())}${summary?' — '+esc(summary):''}</span>`,
+      null, true);
+    saveChatMsg(iid,'ai',`<em>Auto-starting ${esc(intent)}:</em> ${esc(summary)}`);
+    chatJobId=null; chatPlan=null; chatMode=intent;
+    if(intent==='troubleshoot') await startTroubleshoot(iid, summary);
+    else if(intent==='build') await startBuild(iid, summary);
+    else if(intent==='configure') await startConfigure(iid, summary);
+    else await startExplore(iid, summary);
+  } else {
+    appendMsg('ai', esc(data.reply||''));
+  }
+}
+
+function handleAttachSelect(input){
+  const file = input.files[0];
+  if(!file) return;
+  const maxBytes = 5 * 1024 * 1024; // 5 MB
+  if(file.size > maxBytes){alert('Attachment must be under 5 MB.'); input.value=''; return;}
+  const reader = new FileReader();
+  reader.onload = e => {
+    // e.target.result is data:<mime>;base64,<data> for readAsDataURL
+    const dataUrl = e.target.result;
+    const base64 = dataUrl.split(',')[1];
+    chatAttachment = {name: file.name, mime: file.type || 'application/octet-stream', data: base64};
+    renderAttachPreview();
+  };
+  reader.readAsDataURL(file);
+  input.value = ''; // reset so same file can be re-selected
+}
+
+function renderAttachPreview(){
+  const el = document.getElementById('attach-preview');
+  if(!chatAttachment){el.style.display='none'; el.innerHTML=''; return;}
+  const isImg = chatAttachment.mime.startsWith('image/');
+  const thumb = isImg
+    ? `<img src="data:${esc(chatAttachment.mime)};base64,${chatAttachment.data}" alt="">`
+    : `<span>📄</span>`;
+  el.innerHTML = `${thumb}<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(chatAttachment.name)}</span>
+    <button class="attach-remove" onclick="clearAttachment()" title="Remove attachment">✕</button>`;
+  el.style.display='flex';
+}
+
+function clearAttachment(){
+  chatAttachment = null;
+  renderAttachPreview();
+}
+
+async function startExplore(iid, msg){
+  appendMsg('system','<span class="spinner"></span> Collecting instance info…');
+  const res = await api('/api/explore',{method:'POST',body:JSON.stringify({instance_id:iid,message:msg})});
+  const msgs = document.getElementById('chat-messages');
+  msgs.removeChild(msgs.lastChild);
+
+  if(!res.ok){appendMsg('system','Error: '+esc(res.error));return;}
+  chatJobId = res.data.job_id;
+  chatPlan = res.data.response;
+  renderExploreResponse(chatPlan, chatJobId);
+  await autoRunExploreCmds(chatPlan, chatJobId);
+}
+
+function renderExploreResponse(resp, jobId){
+  const cmds = resp.commands||[];
+  let html=`<div class="plan-card">
+    <p style="margin-bottom:0.75rem">${esc(resp.answer||'')}</p>`;
+  if(cmds.length){
+    html+=`<h4 style="margin-bottom:0.5rem">Suggested Commands</h4>`;
+    cmds.forEach((c,i)=>{
+      html+=`<div class="step-row" id="ecmd-${jobId}-${i}">
+        <span class="step-title">${esc(c.title)}</span>
+        <button class="step-exec-btn" onclick="runExploreCmd('${jobId}',${i},${JSON.stringify(c.title)},${JSON.stringify(c.cmd)},this)">Run</button>
+      </div>
+      <div id="ecmd-out-${jobId}-${i}" style="display:none"></div>`;
+    });
+  }
+  html+=`</div>`;
+  appendMsg('ai', html);
+}
+
+async function runExploreCmd(jobId, idx, title, cmd, btn){
+  btn.disabled=true; btn.textContent='Running…';
+  const res = await api('/api/explore_cmd',{method:'POST',body:JSON.stringify({job_id:parseInt(jobId),title,cmd})});
+  btn.textContent='Done';
+  const outEl = document.getElementById(`ecmd-out-${jobId}-${idx}`);
+  outEl.style.display='';
+  if(res.ok){
+    outEl.innerHTML=`<div class="step-output">${esc(res.data.output)}</div>
+      <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(res.data.summary)}</div>`;
+  } else {
+    outEl.innerHTML=`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
+  }
+}
+
+async function autoRunExploreCmds(resp, jobId){
+  const cmds = resp.commands||[];
+  for(let i=0;i<cmds.length;i++){
+    const btn = document.querySelector(`#ecmd-${jobId}-${i} .step-exec-btn`);
+    if(btn) await runExploreCmd(jobId, i, cmds[i].title, cmds[i].cmd, btn);
+  }
+}
+
+async function startTroubleshoot(iid, msg){
+  appendMsg('system','<span class="spinner"></span> Collecting diagnostics…');
+  const res = await api('/api/diagnose',{method:'POST',body:JSON.stringify({instance_id:iid,message:msg})});
+  const msgs = document.getElementById('chat-messages');
+  msgs.removeChild(msgs.lastChild);
+
+  if(!res.ok){appendMsg('system','Error: '+esc(res.error));return;}
+  chatJobId = res.data.job_id;
+  chatPlan = res.data.plan;
+  renderTroubleshootPlan(chatPlan, chatJobId);
+  await autoRunTroubleshootSteps(chatPlan, chatJobId);
+}
+
+function renderTroubleshootPlan(plan, jobId){
+  const riskLevel = plan.risk_level||'low';
+  const riskColor = riskLevel==='high'?'var(--red)':riskLevel==='medium'?'var(--yellow)':'var(--green)';
+  let html = `<div class="plan-card">
+    <h4>Diagnosis</h4>
+    <p style="margin-bottom:0.75rem">${esc(plan.diagnosis)}</p>
+    <p style="font-size:12px;color:${riskColor}">Risk: ${esc(riskLevel.toUpperCase())}</p>
+    <h4 style="margin-top:0.75rem">Fix Steps</h4>`;
+
+  (plan.steps||[]).forEach(step=>{
+    html+=`<div class="step-row" id="step-${jobId}-${step.id}">
+      <span class="step-title">${esc(step.title)}</span>
+      ${step.risky?'<span class="risky-badge">RISKY</span>':''}
+      <button class="step-exec-btn" onclick="execStep('${jobId}','${step.id}',this)">Run</button>
+    </div>
+    <div id="step-out-${jobId}-${step.id}" style="display:none"></div>`;
+  });
+
+  html+=`<div style="margin-top:0.75rem">
+    <button class="verify-btn" onclick="runVerify('${jobId}')">Run Verification</button>
+  </div></div>`;
+  appendMsg('ai', html);
+}
+
+async function execStep(jobId, stepId, btn){
+  btn.disabled=true; btn.textContent='Running…';
+  const res = await api('/api/execute_step',{method:'POST',body:JSON.stringify({job_id:parseInt(jobId),step_id:stepId})});
+  btn.textContent='Done';
+  const outEl = document.getElementById(`step-out-${jobId}-${stepId}`);
+  outEl.style.display='';
+  if(res.ok){
+    outEl.innerHTML=`<div class="step-output">${esc(res.data.output)}</div>
+      <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(res.data.summary)}</div>`;
+  } else {
+    outEl.innerHTML=`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
+  }
+}
+
+async function runVerify(jobId){
+  appendMsg('system','<span class="spinner"></span> Running verification…');
+  const res = await api('/api/verify',{method:'POST',body:JSON.stringify({job_id:parseInt(jobId)})});
+  const msgs = document.getElementById('chat-messages');
+  msgs.removeChild(msgs.lastChild);
+  if(res.ok){
+    appendMsg('ai',`<strong>Verification</strong><br>${esc(res.data.summary)}`, res.data.output);
+  } else {
+    appendMsg('system','Verification error: '+esc(res.error));
+  }
+}
+
+async function autoRunTroubleshootSteps(plan, jobId){
+  for(const step of (plan.steps||[])){
+    const btn = document.querySelector(`#step-${jobId}-${step.id} .step-exec-btn`);
+    if(btn) await execStep(jobId, step.id, btn);
+  }
+  await runVerify(jobId);
+}
+
+async function startBuild(iid, msg){
+  appendMsg('system','<span class="spinner"></span> Collecting system specs…');
+  const res = await api('/api/build/plan',{method:'POST',body:JSON.stringify({instance_id:iid,message:msg})});
+  const msgs = document.getElementById('chat-messages');
+  msgs.removeChild(msgs.lastChild);
+
+  if(!res.ok){appendMsg('system','Error: '+esc(res.error));return;}
+  chatJobId = res.data.job_id;
+  chatPlan = res.data.plan;
+  renderBuildPlan(chatPlan, chatJobId);
+  await autoRunBuildAllSteps(chatPlan, chatJobId);
+}
+
+function renderBuildPlan(plan, jobId){
+  const reqMet = plan.requirements_met;
+  const issues = plan.requirements_issues||[];
+  let html=`<div class="plan-card">
+    <h4>Build Plan — ${esc(plan.intent)}</h4>
+    <p style="margin-bottom:0.25rem"><strong>Method:</strong> ${esc(plan.method)}</p>
+    <p style="margin-bottom:0.5rem;color:${reqMet?'var(--green)':'var(--red)'}">
+      Requirements: ${reqMet?'Met ✓':'Not met ✗'}
+    </p>`;
+  if(issues.length){
+    html+=`<ul style="color:var(--yellow);font-size:12px;margin-bottom:0.75rem;margin-left:1.2rem">
+      ${issues.map(i=>`<li>${esc(i)}</li>`).join('')}
+    </ul>`;
+  }
+
+  (plan.phases||[]).forEach(phase=>{
+    html+=`<div class="phase-header">Phase ${phase.id}: ${esc(phase.name)}</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:0.5rem">
+        ${esc(phase.description)} (~${phase.estimated_minutes}m${phase.risky?' ⚠':''})</p>`;
+    (phase.steps||[]).forEach(step=>{
+      html+=`<div class="step-row" id="bstep-${jobId}-${phase.id}-${step.id}">
+        <span class="step-title">${esc(step.title)}</span>
+        <button class="step-exec-btn" onclick="execBuildStep('${jobId}','${phase.id}','${step.id}',this)">Run</button>
+      </div>
+      <div id="bstep-out-${jobId}-${phase.id}-${step.id}" style="display:none"></div>`;
+    });
+  });
+
+  html+=`<div style="margin-top:0.75rem">
+    <button class="verify-btn" onclick="runPostInstall('${jobId}')">Post Install</button>
+  </div></div>`;
+  appendMsg('ai', html);
+}
+
+async function execBuildStep(jobId, phaseId, stepId, btn){
+  btn.disabled=true; btn.textContent='Running…';
+  const res = await api('/api/build/execute_step',{method:'POST',
+    body:JSON.stringify({job_id:parseInt(jobId),phase_id:phaseId,step_id:stepId})});
+  btn.textContent='Done';
+  const outEl = document.getElementById(`bstep-out-${jobId}-${phaseId}-${stepId}`);
+  outEl.style.display='';
+  if(res.ok){
+    outEl.innerHTML=`<div class="step-output">${esc(res.data.output)}</div>
+      <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(res.data.summary)}</div>`;
+  } else {
+    outEl.innerHTML=`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
+  }
+}
+
+async function runPostInstall(jobId){
+  appendMsg('system','<span class="spinner"></span> Collecting credentials & endpoints…');
+  const res = await api('/api/build/post_install',{method:'POST',body:JSON.stringify({job_id:parseInt(jobId)})});
+  const msgs = document.getElementById('chat-messages');
+  msgs.removeChild(msgs.lastChild);
+  if(res.ok){
+    appendMsg('ai',`<strong>Post-Install Summary</strong><br>${esc(res.data.summary)}`);
+  } else {
+    appendMsg('system','Post-install error: '+esc(res.error));
+  }
+}
+
+async function autoRunBuildAllSteps(plan, jobId){
+  for(const phase of (plan.phases||[])){
+    for(const step of (phase.steps||[])){
+      const btn = document.querySelector(`#bstep-${jobId}-${phase.id}-${step.id} .step-exec-btn`);
+      if(btn) await execBuildStep(jobId, phase.id, step.id, btn);
+    }
+  }
+  await runPostInstall(jobId);
+}
+
+async function startConfigure(iid, msg){
+  appendMsg('system','<span class="spinner"></span> Collecting diagnostics for configuration…');
+  const res = await api('/api/configure/plan',{method:'POST',body:JSON.stringify({instance_id:iid,message:msg})});
+  const msgs = document.getElementById('chat-messages');
+  msgs.removeChild(msgs.lastChild);
+
+  if(!res.ok){appendMsg('system','Error: '+esc(res.error));return;}
+  chatJobId = res.data.job_id;
+  chatPlan = res.data.plan;
+  renderConfigurePlan(chatPlan, chatJobId);
+  await autoRunConfigureSteps(chatPlan, chatJobId);
+}
+
+function renderConfigurePlan(plan, jobId){
+  const riskLevel = plan.risk_level||'low';
+  const riskColor = riskLevel==='high'?'var(--red)':riskLevel==='medium'?'var(--yellow)':'var(--green)';
+  let html = `<div class="plan-card">
+    <h4 style="color:var(--magenta)">Configuration Plan</h4>
+    <p style="margin-bottom:0.5rem">${esc(plan.intent||'')}</p>
+    <p style="font-size:12px;color:${riskColor};margin-bottom:0.75rem">Risk: ${esc(riskLevel.toUpperCase())}</p>
+    <h4 style="margin-top:0.75rem">Steps</h4>`;
+
+  (plan.steps||[]).forEach(step=>{
+    html+=`<div class="step-row" id="cfgstep-${jobId}-${step.id}">
+      <span class="step-title">${esc(step.title)}</span>
+      ${step.risky?'<span class="risky-badge">RISKY</span>':''}
+      <button class="step-exec-btn" onclick="execConfigureStep('${jobId}','${step.id}',this)">Run</button>
+    </div>
+    <div id="cfgstep-out-${jobId}-${step.id}" style="display:none"></div>`;
+  });
+
+  html+=`<div style="margin-top:0.75rem">
+    <button class="verify-btn" onclick="runConfigureVerify('${jobId}')">Verify Configuration</button>
+  </div></div>`;
+  appendMsg('ai', html);
+}
+
+async function execConfigureStep(jobId, stepId, btn){
+  btn.disabled=true; btn.textContent='Running…';
+  const res = await api('/api/configure/execute_step',{method:'POST',
+    body:JSON.stringify({job_id:parseInt(jobId),step_id:stepId})});
+  btn.textContent='Done';
+  const outEl = document.getElementById(`cfgstep-out-${jobId}-${stepId}`);
+  outEl.style.display='';
+  if(res.ok){
+    outEl.innerHTML=`<div class="step-output">${esc(res.data.output)}</div>
+      <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(res.data.summary)}</div>`;
+  } else {
+    outEl.innerHTML=`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
+  }
+}
+
+async function runConfigureVerify(jobId){
+  appendMsg('system','<span class="spinner"></span> Verifying configuration…');
+  const res = await api('/api/configure/verify',{method:'POST',body:JSON.stringify({job_id:parseInt(jobId)})});
+  const msgs = document.getElementById('chat-messages');
+  msgs.removeChild(msgs.lastChild);
+  if(res.ok){
+    appendMsg('ai',`<strong>Verification</strong><br>${esc(res.data.summary)}`, res.data.output);
+  } else {
+    appendMsg('system','Verification error: '+esc(res.error));
+  }
+}
+
+async function autoRunConfigureSteps(plan, jobId){
+  for(const step of (plan.steps||[])){
+    const btn = document.querySelector(`#cfgstep-${jobId}-${step.id} .step-exec-btn`);
+    if(btn) await execConfigureStep(jobId, step.id, btn);
+  }
+  await runConfigureVerify(jobId);
+}
+
+async function startReplicate(srcId, tgtId, msg){
+  appendMsg('system','<span class="spinner"></span> Generating replication plan…');
+  const res = await api('/api/replicate/plan',{method:'POST',body:JSON.stringify({
+    source_instance_id:srcId, target_instance_id:tgtId})});
+  const msgs = document.getElementById('chat-messages');
+  msgs.removeChild(msgs.lastChild);
+  if(!res.ok){appendMsg('system','Error: '+esc(res.error));return;}
+  chatJobId=res.data.job_id;
+  chatPlan=res.data.plan;
+  renderReplicatePlan(chatPlan, chatJobId);
+}
+
+function renderReplicatePlan(plan, jobId){
+  let html=`<div class="plan-card">
+    <h4>Replication Plan</h4>
+    <p style="margin-bottom:0.5rem">${esc(plan.summary)}</p>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:0.5rem">Source role: ${esc(plan.source_role)}</p>`;
+  if(plan.warnings?.length){
+    html+=`<div style="color:var(--yellow);font-size:12px;margin-bottom:0.75rem">
+      ⚠ ${plan.warnings.map(esc).join('<br>⚠ ')}</div>`;
+  }
+  (plan.phases||[]).forEach(phase=>{
+    html+=`<div class="phase-header">Phase ${phase.id}: ${esc(phase.name)}</div>`;
+    (phase.steps||[]).forEach(step=>{
+      html+=`<div class="step-row">
+        <span class="step-title">${esc(step.title)}</span>
+        <button class="step-exec-btn" onclick="execReplStep('${jobId}','${phase.id}','${step.id}',this)">Run</button>
+      </div>
+      <div id="replstep-out-${jobId}-${phase.id}-${step.id}" style="display:none"></div>`;
+    });
+  });
+  html+=`<div style="margin-top:0.75rem;display:flex;gap:0.75rem">
+    <button class="verify-btn" onclick="runReplVerify('${jobId}')">Post-Verify</button>
+    <button class="btn-sm" onclick="savePlaybook('${jobId}')">Save Playbook to Target</button>
+  </div></div>`;
+  appendMsg('ai', html);
+}
+
+async function execReplStep(jobId, phaseId, stepId, btn){
+  btn.disabled=true; btn.textContent='Running…';
+  const res = await api(`/api/replicate/${jobId}/step`,{method:'POST',
+    body:JSON.stringify({phase_id:phaseId,step_id:stepId})});
+  btn.textContent='Done';
+  const outEl = document.getElementById(`replstep-out-${jobId}-${phaseId}-${stepId}`);
+  outEl.style.display='';
+  outEl.innerHTML=res.ok
+    ?`<div class="step-output">${esc(res.data.output)}</div>`
+    :`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
+}
+
+async function runReplVerify(jobId){
+  appendMsg('system','<span class="spinner"></span> Running post-verification…');
+  const res = await api(`/api/replicate/${jobId}/verify`,{method:'POST'});
+  const msgs = document.getElementById('chat-messages');
+  msgs.removeChild(msgs.lastChild);
+  appendMsg(res.ok?'ai':'system', res.ok
+    ?`<strong>Verification</strong><br>${esc(res.data.output)}`
+    :'Error: '+esc(res.error));
+}
+
+async function savePlaybook(jobId){
+  const res = await api(`/api/replicate/${jobId}/playbook`,{method:'POST',body:JSON.stringify({})});
+  appendMsg('system', res.ok
+    ?`Playbook saved to ${esc(res.data.path)} on target.`
+    :'Error: '+esc(res.error));
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Job History
+// ──────────────────────────────────────────────────────────────────────────────
+async function loadJobs(){
+  const iid = document.getElementById('job-filter-instance').value;
+  const jtype = document.getElementById('job-filter-type').value;
+  let url='/api/jobs?';
+  if(iid) url+='instance_id='+iid+'&';
+  if(jtype) url+='type='+jtype;
+  const res = await api(url);
+  const jobs = res.data||[];
+  const tbody = document.getElementById('jobs-tbody');
+  tbody.innerHTML = jobs.length ? jobs.map(j=>`
+    <tr>
+      <td>${j.id}</td>
+      <td>${esc(j.instance_label||j.instance_id||'?')}</td>
+      <td>${esc(j.type)}</td>
+      <td class="job-link" onclick="openJobPanel(${j.id})">${esc(j.title)}</td>
+      <td><span class="${badgeClass(j.status)}">${esc(j.status)}</span></td>
+      <td>${fmtDate(j.started_at)}</td>
+      <td>${fmtDur(j.duration_sec)}</td>
+      <td><button class="btn-sm btn-danger" onclick="deleteJob(${j.id})">✕</button></td>
+    </tr>`).join('') : '<tr><td colspan="8" class="empty-msg">No jobs found.</td></tr>';
+}
+
+async function openJobPanel(jid){
+  const res = await api('/api/jobs/'+jid);
+  const job = res.data;
+  document.getElementById('panel-title').textContent=`Job #${jid} — ${job.title}`;
+  let html=`<div style="margin-bottom:1rem">
+    <span class="${badgeClass(job.status)}">${esc(job.status)}</span>
+    <span style="margin-left:0.75rem;font-size:12px;color:var(--muted)">${fmtDate(job.started_at)}</span>
+  </div>`;
+  if(job.result){html+=`<p style="font-size:12px;color:var(--muted);margin-bottom:1rem">${esc(job.result)}</p>`;}
+  const steps = job.steps||[];
+  if(steps.length){
+    html+=`<h4 style="color:var(--accent);margin-bottom:0.5rem">Steps</h4>`;
+    steps.forEach(s=>{
+      const cmds = JSON.parse(s.commands||'[]');
+      html+=`<div class="step-detail">
+        <div class="step-detail-title">${esc(s.title||s.step_id)} 
+          <span class="${s.success?'inline-ok':'inline-err'}" style="font-size:11px;padding:1px 6px;border-radius:3px">
+            ${s.success?'✓ OK':'✗ FAIL'}
+          </span>
+        </div>
+        <div class="step-detail-cmds">${cmds.map(esc).join('\n')}</div>
+        <div class="step-detail-output">${esc(s.output||'')}</div>
+      </div>`;
+    });
+  } else {
+    html+='<p class="empty-msg">No steps recorded.</p>';
+  }
+  document.getElementById('panel-body').innerHTML=html;
+  document.getElementById('side-panel').classList.add('open');
+}
+
+function closePanel(){
+  document.getElementById('side-panel').classList.remove('open');
+}
+
+async function deleteJob(jid){
+  if(!confirm('Delete this job?'))return;
+  await api('/api/jobs/'+jid,{method:'DELETE'});
+  loadJobs();
+}
+
+document.getElementById('job-filter-instance').onchange=loadJobs;
+document.getElementById('job-filter-type').onchange=loadJobs;
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Study Reports
+// ──────────────────────────────────────────────────────────────────────────────
+async function loadStudies(){
+  const iid = document.getElementById('study-filter-instance').value;
+  let url='/api/studies';
+  if(iid) url+='?instance_id='+iid;
+  const res = await api(url);
+  const studies = res.data||[];
+  const el = document.getElementById('studies-list');
+  el.innerHTML = studies.length ? studies.map(s=>`
+    <div class="study-card">
+      <div class="study-info">
+        <div><strong>${esc(s.instance_label||s.instance_id)}</strong></div>
+        <div style="font-size:12px;color:var(--muted)">${fmtDate(s.created_at)}</div>
+      </div>
+      <div class="study-actions">
+        <button class="btn-sm" onclick="window.open('/api/studies/${s.id}/html','_blank')">HTML Report</button>
+        <button class="btn-sm btn-danger" onclick="deleteStudy(${s.id})">Delete</button>
+      </div>
+    </div>`).join('') : '<p class="empty-msg">No study reports.</p>';
+}
+
+async function deleteStudy(sid){
+  if(!confirm('Delete this study report?'))return;
+  await api('/api/studies/'+sid,{method:'DELETE'});
+  loadStudies();
+}
+
+document.getElementById('study-filter-instance').onchange=loadStudies;
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Alerts & Schedule
+// ──────────────────────────────────────────────────────────────────────────────
+async function loadNotifyConfig(){
+  const res = await api('/api/notifications/config');
+  const c = res.data||{};
+  document.getElementById('cfg-slack-webhook').value=c.slack_webhook||'';
+  document.getElementById('cfg-enabled').checked=!!c.enabled;
+  document.getElementById('cfg-notify-jobs').checked=!!c.notify_jobs;
+  document.getElementById('cfg-notify-studies').checked=!!c.notify_all_studies;
+  document.getElementById('cfg-notify-unreachable').checked=!!c.notify_unreachable;
+  document.getElementById('cfg-alert-failed-svcs').checked=!!c.alert_on_failed_services;
+  document.getElementById('cfg-score-below').value=c.alert_score_below||70;
+  document.getElementById('cfg-smtp-host').value=c.smtp_host||'';
+  document.getElementById('cfg-smtp-port').value=c.smtp_port||587;
+  document.getElementById('cfg-smtp-user').value=c.smtp_user||'';
+  document.getElementById('cfg-smtp-pass').value=c.smtp_pass||'';
+  document.getElementById('cfg-email-from').value=c.email_from||'';
+  document.getElementById('cfg-email-to').value=c.email_to||'';
+  document.getElementById('cfg-smtp-tls').checked=c.smtp_tls!==false;
+}
+
+async function saveNotifyConfig(){
+  const cfg={
+    slack_webhook:document.getElementById('cfg-slack-webhook').value,
+    enabled:document.getElementById('cfg-enabled').checked,
+    notify_jobs:document.getElementById('cfg-notify-jobs').checked,
+    notify_all_studies:document.getElementById('cfg-notify-studies').checked,
+    notify_unreachable:document.getElementById('cfg-notify-unreachable').checked,
+    alert_on_failed_services:document.getElementById('cfg-alert-failed-svcs').checked,
+    alert_score_below:parseInt(document.getElementById('cfg-score-below').value)||70,
+    smtp_host:document.getElementById('cfg-smtp-host').value,
+    smtp_port:parseInt(document.getElementById('cfg-smtp-port').value)||587,
+    smtp_user:document.getElementById('cfg-smtp-user').value,
+    smtp_pass:document.getElementById('cfg-smtp-pass').value,
+    email_from:document.getElementById('cfg-email-from').value,
+    email_to:document.getElementById('cfg-email-to').value,
+    smtp_tls:document.getElementById('cfg-smtp-tls').checked,
+  };
+  const res = await api('/api/notifications/config',{method:'POST',body:JSON.stringify(cfg)});
+  setMsg('notify-msg', res.ok?'Saved successfully':'Error: '+res.error, res.ok);
+}
+
+async function testNotify(){
+  const cfg={slack_webhook:document.getElementById('cfg-slack-webhook').value,
+    smtp_host:document.getElementById('cfg-smtp-host').value,
+    smtp_user:document.getElementById('cfg-smtp-user').value,
+    smtp_pass:document.getElementById('cfg-smtp-pass').value,
+    email_from:document.getElementById('cfg-email-from').value,
+    email_to:document.getElementById('cfg-email-to').value,
+    smtp_port:parseInt(document.getElementById('cfg-smtp-port').value),
+    smtp_tls:document.getElementById('cfg-smtp-tls').checked};
+  const res = await api('/api/notifications/test',{method:'POST',body:JSON.stringify(cfg)});
+  const r = res.data||{};
+  setMsg('notify-msg', `Slack: ${r.slack||'skipped'} | Email: ${r.email||'skipped'}`,
+    r.slack==='ok'||r.email==='ok');
+}
+
+// Schedule
+document.getElementById('sched-mode').onchange=function(){
+  document.getElementById('sched-interval-row').style.display=this.value==='interval'?'':'none';
+  document.getElementById('sched-cron-row').style.display=this.value==='cron'?'':'none';
+};
+
+document.getElementById('sched-instance-select').onchange=function(){
+  loadScheduleFor(parseInt(this.value));
+};
+
+async function loadScheduleFor(iid){
+  if(!iid)return;
+  const res = await api('/api/instances/'+iid+'/schedule');
+  const s = res.data||{};
+  document.getElementById('sched-enabled').checked=!!s.enabled;
+  document.getElementById('sched-mode').value=s.mode||'interval';
+  document.getElementById('sched-hours').value=s.interval_hours||6;
+  document.getElementById('sched-cron').value=s.cron_expr||'0 */6 * * *';
+  document.getElementById('sched-mode').dispatchEvent(new Event('change'));
+}
+
+async function saveSchedule(){
+  const iid=parseInt(document.getElementById('sched-instance-select').value);
+  if(!iid){setMsg('sched-msg','Select an instance',false);return;}
+  const data={
+    enabled:document.getElementById('sched-enabled').checked,
+    mode:document.getElementById('sched-mode').value,
+    interval_hours:parseFloat(document.getElementById('sched-hours').value)||6,
+    cron_expr:document.getElementById('sched-cron').value||'0 */6 * * *',
+  };
+  const res=await api('/api/instances/'+iid+'/schedule',{method:'POST',body:JSON.stringify(data)});
+  setMsg('sched-msg',res.ok?'Saved':'Error: '+res.error,res.ok);
+  loadSchedulerJobs();
+}
+
+async function deleteSchedule(){
+  const iid=parseInt(document.getElementById('sched-instance-select').value);
+  if(!iid)return;
+  await api('/api/instances/'+iid+'/schedule',{method:'DELETE'});
+  setMsg('sched-msg','Schedule removed',true);
+  loadSchedulerJobs();
+}
+
+async function loadSchedulerJobs(){
+  const res=await api('/api/scheduler/jobs');
+  const jobs=res.data||[];
+  const el=document.getElementById('scheduler-jobs-list');
+  el.innerHTML = jobs.length ? jobs.map(j=>
+    `<div style="margin-bottom:4px"><code style="color:var(--accent)">${esc(j.id)}</code>
+     — next: ${esc(j.next_run||'not scheduled')}</div>`).join('') :
+    '<div style="color:var(--muted)">No active scheduler jobs</div>';
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Monitoring
+// ──────────────────────────────────────────────────────────────────────────────
+let monitorPollTimer = null;
+let monitorThresholds = {};
+
+function stopMonitorPoll(){
+  if(monitorPollTimer){clearInterval(monitorPollTimer);monitorPollTimer=null;}
+}
+
+function startMonitorPoll(){
+  loadMonitoring();
+  monitorPollTimer = setInterval(loadMonitoring, 30000);
+}
+
+function monMetricColor(val, warn, crit){
+  if(val==null) return 'var(--muted)';
+  if(val>=crit)  return 'var(--red)';
+  if(val>=warn)  return 'var(--yellow)';
+  return 'var(--green)';
+}
+
+function fmtBytes(b){
+  if(b==null) return '—';
+  if(b>=1e9) return (b/1e9).toFixed(1)+' GB';
+  if(b>=1e6) return (b/1e6).toFixed(1)+' MB';
+  if(b>=1e3) return (b/1e3).toFixed(1)+' KB';
+  return b+' B';
+}
+
+function renderMonCard(inst, t){
+  const status = inst.status;
+  const dotCls  = 'dot-'+status;
+  const badgeCls = 'badge-'+status;
+
+  if(status==='unreachable'){
+    return`<div class="mon-card unreachable" onclick="openMonDetail(${inst.id})">
+      <div class="mon-card-header">
+        <div class="mon-card-dot ${dotCls}"></div>
+        <strong style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(inst.label)}</strong>
+        <span class="mon-status-badge ${badgeCls}">unreachable</span>
+      </div>
+      <div style="font-size:11px;color:var(--muted)">${esc(inst.host)}</div>
+      <div class="unreachable-msg">${esc(inst.error||'SSH connection failed')}</div>
+    </div>`;
+  }
+
+  const m = inst.metrics||{};
+  const cpu  = m.cpu_pct;
+  const mem  = m.mem_pct;
+  const disk = m.disk_pct;
+  const cpuCol  = monMetricColor(cpu,  t.cpu_warn,  t.cpu_crit);
+  const memCol  = monMetricColor(mem,  t.mem_warn,  t.mem_crit);
+  const diskCol = monMetricColor(disk, t.disk_warn, t.disk_crit);
+
+  const memStr  = (m.mem_used_mb&&m.mem_total_mb)
+    ? `${(m.mem_used_mb/1024).toFixed(1)}/${(m.mem_total_mb/1024).toFixed(1)} GB` : '—';
+  const diskStr = (m.disk_used_kb&&m.disk_total_kb)
+    ? `${Math.round(m.disk_used_kb/1048576)}/${Math.round(m.disk_total_kb/1048576)} GB` : '—';
+
+  const metricCells=`
+    <div class="mon-metric"><div class="mon-metric-val" style="color:${cpuCol}">${cpu??'—'}%</div><div class="mon-metric-lbl">CPU</div></div>
+    <div class="mon-metric"><div class="mon-metric-val" style="color:${memCol};font-size:11px">${memStr}</div><div class="mon-metric-lbl">Memory</div></div>
+    <div class="mon-metric"><div class="mon-metric-val" style="color:${diskCol};font-size:11px">${diskStr}</div><div class="mon-metric-lbl">Disk</div></div>
+    <div class="mon-metric"><div class="mon-metric-val" style="font-size:10px;line-height:1.3">${esc(m.uptime_str||'—')}</div><div class="mon-metric-lbl">Uptime</div></div>`;
+
+  const bars=`<div class="mon-bars">
+    <div class="mon-bar-row"><span class="mon-bar-label">CPU</span>
+      <div class="mon-bar-track"><div class="mon-bar-fill" style="width:${Math.min(cpu||0,100)}%;background:${cpuCol}"></div></div>
+      <span class="mon-bar-pct" style="color:${cpuCol}">${cpu??'—'}%</span></div>
+    <div class="mon-bar-row"><span class="mon-bar-label">Mem</span>
+      <div class="mon-bar-track"><div class="mon-bar-fill" style="width:${Math.min(mem||0,100)}%;background:${memCol}"></div></div>
+      <span class="mon-bar-pct" style="color:${memCol}">${mem??'—'}%</span></div>
+    <div class="mon-bar-row"><span class="mon-bar-label">Disk</span>
+      <div class="mon-bar-track"><div class="mon-bar-fill" style="width:${Math.min(disk||0,100)}%;background:${diskCol}"></div></div>
+      <span class="mon-bar-pct" style="color:${diskCol}">${disk??'—'}%</span></div>
+  </div>`;
+
+  let svcOrProcs='';
+  if(status==='healthy'){
+    const svcs = m.key_services||{};
+    const pills = Object.entries(svcs).map(([name,state])=>{
+      const active = state==='active';
+      return`<span class="svc-pill ${active?'svc-active':'svc-inactive'}" title="${esc(name)}: ${esc(state)}">${esc(name)}</span>`;
+    }).join('');
+    if(pills) svcOrProcs=`<div class="mon-svcs">${pills}</div>`;
+  } else if(status==='warning'||status==='critical'){
+    const topCpu = m.top_cpu_procs||[];
+    const topMem = m.top_mem_procs||[];
+    if(topCpu.length||topMem.length){
+      svcOrProcs=`<div class="mon-proc-grid">`;
+      if(topCpu.length){
+        svcOrProcs+=`<div><div class="mon-proc-title">Top CPU</div>
+          <table class="mon-proc-table">
+            ${topCpu.map(p=>`<tr><td title="${esc(p.name)}">${esc(p.name)}</td><td>${p.cpu}%</td></tr>`).join('')}
+          </table></div>`;
+      }
+      if(topMem.length){
+        svcOrProcs+=`<div><div class="mon-proc-title">Top Memory</div>
+          <table class="mon-proc-table">
+            ${topMem.map(p=>`<tr><td title="${esc(p.name)}">${esc(p.name)}</td><td>${p.mem}%</td></tr>`).join('')}
+          </table></div>`;
+      }
+      svcOrProcs+=`</div>`;
+    }
+  }
+
+  const failedNames = m.failed_service_names||[];
+  const failedWarn = failedNames.length
+    ? `<div class="failed-svc-warn">⚠ ${m.failed_svc_count} failed service${m.failed_svc_count>1?'s':''}: ${failedNames.map(n=>`<code style="font-size:10px">${esc(n)}</code>`).join(' ')}</div>`
+    : (m.failed_svc_count>0)
+      ? `<div class="failed-svc-warn">⚠ ${m.failed_svc_count} failed service${m.failed_svc_count>1?'s':''}</div>`
+      : '';
+
+  const footer=`<div class="mon-card-footer">
+    <span>RX ${fmtBytes(m.net_rx_bytes)}</span>
+    <span>TX ${fmtBytes(m.net_tx_bytes)}</span>
+    <span>Load: ${esc(m.load_avg||'—')}</span>
+    <span style="margin-left:auto">${m.running_svc_count??'—'} services</span>
+  </div>`;
+
+  return`<div class="mon-card" onclick="openMonDetail(${inst.id})">
+    <div class="mon-card-header">
+      <div class="mon-card-dot ${dotCls}"></div>
+      <strong style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(inst.label)}</strong>
+      <span class="mon-status-badge ${badgeCls}">${esc(status)}</span>${inst.stale?'<span style="margin-left:4px;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:600;background:#1c2128;color:#d29922;border:1px solid #d29922">STALE</span>':''}
+    </div>
+    <div style="font-size:11px;color:var(--muted)">${esc(inst.host)}</div>
+    <div class="mon-metrics-row">${metricCells}</div>
+    ${bars}
+    ${svcOrProcs}
+    ${failedWarn}
+    ${footer}
+  </div>`;
+}
+
+async function loadMonitoring(){
+  const grid = document.getElementById('mon-inst-grid');
+  // Only show the loading spinner on the very first load (empty grid).
+  // Background auto-polls must leave existing cards in place so they don't
+  // all flash to "gone" for the entire SSH polling duration (~5-35 s).
+  if(!grid.querySelector('.mon-card')){
+    grid.innerHTML='<p class="empty-msg"><span class="spinner"></span> Polling instances…</p>';
+  }
+  const res = await api('/api/monitoring');
+  if(!res.ok){
+    grid.innerHTML=`<p class="empty-msg" style="color:var(--red)">Error: ${esc(res.error)}</p>`;
+    return;
+  }
+  const d = res.data||{};
+  monitorThresholds = d.thresholds||{};
+  const s = d.summary||{};
+
+  // Summary cards
+  document.getElementById('mon-total').textContent = s.total??'—';
+  const avgCpuEl = document.getElementById('mon-avg-cpu');
+  avgCpuEl.textContent = s.avg_cpu!=null ? s.avg_cpu+'%' : '—';
+  avgCpuEl.style.color = monMetricColor(s.avg_cpu, monitorThresholds.cpu_warn, monitorThresholds.cpu_crit);
+  const avgMemEl = document.getElementById('mon-avg-mem');
+  avgMemEl.textContent = s.avg_mem!=null ? s.avg_mem+'%' : '—';
+  avgMemEl.style.color = monMetricColor(s.avg_mem, monitorThresholds.mem_warn, monitorThresholds.mem_crit);
+  const alertCntEl = document.getElementById('mon-alert-count');
+  alertCntEl.textContent = s.alert_count??'—';
+  alertCntEl.style.color = (s.alert_count>0) ? 'var(--red)' : 'var(--green)';
+
+  // Alerts banner
+  const banner = document.getElementById('mon-alerts-banner');
+  const alertList = document.getElementById('mon-alerts-list');
+  const alerts = d.alerts||[];
+  if(alerts.length){
+    alertList.innerHTML = alerts.map(a=>`
+      <div class="mon-alert-item">
+        <span class="badge ${a.severity==='critical'?'badge-critical':'badge-warning'}">${esc(a.severity)}</span>
+        <span style="color:var(--accent)">${esc(a.instance_label||'')}</span>
+        <span>${esc(a.metric)}: ${a.value}${typeof a.value==='number'&&a.metric!=='Failed Services'?'%':''}</span>
+        <span style="color:var(--muted);margin-left:auto;font-size:11px">${fmtDate(a.at)}</span>
+      </div>`).join('');
+    banner.style.display='';
+  } else {
+    banner.style.display='none';
+  }
+
+  // Instance grid
+  const insts = d.instances||[];
+  monInstCache = {};
+  insts.forEach(i=>{ monInstCache[i.id]=i; });
+  grid.innerHTML = insts.length
+    ? insts.map(inst=>renderMonCard(inst, monitorThresholds)).join('')
+    : '<p class="empty-msg">No instances configured.</p>';
+
+  // Last poll timestamp
+  document.getElementById('mon-last-poll').textContent = 'Updated '+new Date().toLocaleTimeString();
+
+  // Footer threshold display
+  const t = monitorThresholds;
+  document.getElementById('mon-thresholds-display').innerHTML =
+    `CPU warn <code>${t.cpu_warn}%</code> crit <code>${t.cpu_crit}%</code> · `+
+    `Mem warn <code>${t.mem_warn}%</code> crit <code>${t.mem_crit}%</code> · `+
+    `Disk warn <code>${t.disk_warn}%</code> crit <code>${t.disk_crit}%</code>`;
+}
+
+async function openThresholdModal(){
+  const res = await api('/api/monitoring/thresholds');
+  const t = res.data||{};
+  document.getElementById('thr-cpu-warn').value  = t.cpu_warn??75;
+  document.getElementById('thr-cpu-crit').value  = t.cpu_crit??90;
+  document.getElementById('thr-mem-warn').value  = t.mem_warn??70;
+  document.getElementById('thr-mem-crit').value  = t.mem_crit??85;
+  document.getElementById('thr-disk-warn').value = t.disk_warn??75;
+  document.getElementById('thr-disk-crit').value = t.disk_crit??90;
+  document.getElementById('thr-msg').innerHTML='';
+  document.getElementById('modal-thresholds-overlay').classList.add('open');
+}
+
+function closeThresholdModal(){
+  document.getElementById('modal-thresholds-overlay').classList.remove('open');
+}
+
+async function saveThresholds(){
+  const t={
+    cpu_warn:  parseFloat(document.getElementById('thr-cpu-warn').value)||75,
+    cpu_crit:  parseFloat(document.getElementById('thr-cpu-crit').value)||90,
+    mem_warn:  parseFloat(document.getElementById('thr-mem-warn').value)||70,
+    mem_crit:  parseFloat(document.getElementById('thr-mem-crit').value)||85,
+    disk_warn: parseFloat(document.getElementById('thr-disk-warn').value)||75,
+    disk_crit: parseFloat(document.getElementById('thr-disk-crit').value)||90,
+  };
+  const res = await api('/api/monitoring/thresholds',{method:'POST',body:JSON.stringify(t)});
+  if(res.ok){
+    monitorThresholds = res.data;
+    closeThresholdModal();
+    if(activeTab==='monitoring') loadMonitoring();
+  } else {
+    setMsg('thr-msg','Error: '+res.error, false);
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Metric history chart (plain SVG)
+// ──────────────────────────────────────────────────────────────────────────────
+let monHistInstId = null;
+let monHistMetric = 'cpu_pct';
+let monHistRange  = '1h';
+
+function fmtChartTime(ts){
+  if(!ts) return '';
+  try{
+    const d = new Date(ts.includes('T') ? ts : ts.replace(' ','T')+'Z');
+    return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  }catch{return ts.slice(11,16);}
+}
+
+function renderHistChart(container, points, metric, t, stats){
+  if(!points||!points.length){
+    container.innerHTML='<p style="text-align:center;padding:1rem;color:var(--muted);font-size:12px">No data recorded yet — data accumulates with each refresh.</p>';
+    return;
+  }
+  const W=600,H=110,ML=40,MR=12,MT=10,MB=22;
+  const cW=W-ML-MR, cH=H-MT-MB;
+  const vals=points.map(p=>p.value);
+  const minV=Math.min(...vals), maxV=Math.max(...vals);
+  const vRange=maxV-minV||1;
+  const xS=i=>ML+(i/(points.length-1||1))*cW;
+  const yS=v=>MT+cH-((v-minV)/vRange)*cH;
+  const pctMetrics={cpu_pct:['cpu_warn','cpu_crit'],mem_pct:['mem_warn','mem_crit'],disk_pct:['disk_warn','disk_crit']};
+  const lineColor = pctMetrics[metric]
+    ? monMetricColor(stats&&stats.avg!=null?stats.avg:vals[vals.length-1], t[pctMetrics[metric][0]], t[pctMetrics[metric][1]])
+    : 'var(--blue)';
+  const poly=points.map((p,i)=>`${xS(i)},${yS(p.value)}`).join(' ');
+  const area=[`${ML},${MT+cH}`,...points.map((p,i)=>`${xS(i)},${yS(p.value)}`),,`${ML+cW},${MT+cH}`].join(' ');
+  let threshLines='';
+  if(pctMetrics[metric]&&t){
+    const [wk,ck]=pctMetrics[metric];
+    const wy=yS(t[wk]),cy=yS(t[ck]);
+    if(wy>=MT&&wy<=MT+cH) threshLines+=`<line x1="${ML}" y1="${wy}" x2="${ML+cW}" y2="${wy}" stroke="var(--yellow)" stroke-width="0.8" stroke-dasharray="4,3" opacity="0.7"/>`;
+    if(cy>=MT&&cy<=MT+cH) threshLines+=`<line x1="${ML}" y1="${cy}" x2="${ML+cW}" y2="${cy}" stroke="var(--red)" stroke-width="0.8" stroke-dasharray="4,3" opacity="0.7"/>`;
+  }
+  const t0=fmtChartTime(points[0].timestamp), tN=fmtChartTime(points[points.length-1].timestamp);
+  container.innerHTML=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:130px;display:block;overflow:visible">
+    <line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+cH}" stroke="var(--border)" stroke-width="1"/>
+    <line x1="${ML}" y1="${MT+cH}" x2="${ML+cW}" y2="${MT+cH}" stroke="var(--border)" stroke-width="1"/>
+    <line x1="${ML}" y1="${MT}" x2="${ML+cW}" y2="${MT}" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="2,4"/>
+    <line x1="${ML}" y1="${MT+cH/2}" x2="${ML+cW}" y2="${MT+cH/2}" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="2,4"/>
+    <text x="${ML-4}" y="${MT+4}" text-anchor="end" font-size="9" fill="var(--muted)">${maxV.toFixed(1)}</text>
+    <text x="${ML-4}" y="${MT+cH/2+4}" text-anchor="end" font-size="9" fill="var(--muted)">${((minV+maxV)/2).toFixed(1)}</text>
+    <text x="${ML-4}" y="${MT+cH+2}" text-anchor="end" font-size="9" fill="var(--muted)">${minV.toFixed(1)}</text>
+    ${threshLines}
+    <polygon points="${area}" fill="${lineColor}" opacity="0.1"/>
+    <polyline points="${poly}" fill="none" stroke="${lineColor}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+    <text x="${ML}" y="${H-3}" font-size="9" fill="var(--muted)">${t0}</text>
+    <text x="${ML+cW}" y="${H-3}" text-anchor="end" font-size="9" fill="var(--muted)">${tN}</text>
+    <text x="${ML+cW/2}" y="${H-3}" text-anchor="middle" font-size="9" fill="var(--muted)">${points.length} pts</text>
+  </svg>`;
+}
+
+async function loadMonHistoryForDetail(instId){
+  const chartEl=document.getElementById('mon-hist-chart');
+  const statsEl=document.getElementById('mon-hist-stats');
+  if(!chartEl) return;
+  chartEl.innerHTML='<p style="text-align:center;padding:0.75rem;color:var(--muted)"><span class="spinner"></span></p>';
+  statsEl.innerHTML='';
+  const captureMetric=monHistMetric, captureRange=monHistRange;
+  const res=await api(`/api/monitoring/history?instance_id=${instId}&metric=${captureMetric}&range=${captureRange}`);
+  if(monHistInstId!==instId||monHistMetric!==captureMetric||monHistRange!==captureRange) return;
+  if(!res.ok){chartEl.innerHTML=`<p style="color:var(--red);font-size:12px;padding:0.5rem">${esc(res.error)}</p>`;return;}
+  const d=res.data||{};
+  renderHistChart(chartEl,d.points||[],captureMetric,monitorThresholds,d);
+  const unit=captureMetric.includes('_kb')?'KB/s':'%';
+  statsEl.innerHTML = d.min!=null
+    ?`<span>Min: <strong>${d.min}${unit}</strong></span>`+
+      `<span>Avg: <strong>${d.avg}${unit}</strong></span>`+
+      `<span>Max: <strong>${d.max}${unit}</strong></span>`
+    :'<span style="color:var(--muted)">No data recorded yet.</span>';
+}
+
+function switchHistMetric(metric){
+  monHistMetric=metric;
+  document.querySelectorAll('#mon-hist-metric-tabs .btn-hist-tab').forEach(b=>{b.classList.toggle('active',b.dataset.metric===metric);});
+  if(monHistInstId) loadMonHistoryForDetail(monHistInstId);
+}
+
+function switchHistRange(range){
+  monHistRange=range;
+  document.querySelectorAll('#mon-hist-range-tabs .btn-hist-tab').forEach(b=>{b.classList.toggle('active',b.dataset.range===range);});
+  if(monHistInstId) loadMonHistoryForDetail(monHistInstId);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Alert history (monitoring tab section)
+// ──────────────────────────────────────────────────────────────────────────────
+function toggleAlertHistory(){
+  const el=document.getElementById('mon-alert-history-section');
+  if(el.style.display==='none'){el.style.display='';loadAlertHistory();}
+  else el.style.display='none';
+}
+
+async function loadAlertHistory(){
+  const listEl=document.getElementById('mon-ah-list');
+  const summaryEl=document.getElementById('mon-ah-summary');
+  const status=document.getElementById('mon-ah-status').value;
+  listEl.innerHTML='<p class="empty-msg"><span class="spinner"></span></p>';
+  const res=await api(`/api/monitoring/alerts/history?status=${status}&limit=100`);
+  if(!res.ok){listEl.innerHTML=`<p class="empty-msg" style="color:var(--red)">${esc(res.error)}</p>`;return;}
+  const d=res.data||{};
+  summaryEl.textContent=`${d.active_count??0} active · ${d.resolved_count??0} resolved`;
+  const alerts=d.alerts||[];
+  if(!alerts.length){listEl.innerHTML='<p class="empty-msg">No alert history.</p>';return;}
+  listEl.innerHTML=`<table class="mon-ah-table">
+    <thead><tr><th>Instance</th><th>Metric</th><th>Severity</th><th>Value</th><th>Fired</th><th>Duration</th><th>Status</th><th></th></tr></thead>
+    <tbody>${alerts.map(a=>`<tr>
+      <td style="color:var(--accent)">${esc(a.instance_label||a.instance_id)}</td>
+      <td>${esc(a.metric)}</td>
+      <td><span class="badge ${a.severity==='critical'?'badge-critical':'badge-warning'}">${esc(a.severity)}</span></td>
+      <td>${a.value}${a.metric!=='Failed Services'?'%':''}</td>
+      <td style="font-size:11px;color:var(--muted);white-space:nowrap">${fmtDate(a.fired_at)}</td>
+      <td style="font-size:11px;color:var(--muted)">${a.duration_min!=null?a.duration_min+'m':'—'}</td>
+      <td><span class="badge ${a.status==='active'?'badge-running':'badge-done'}">${esc(a.status)}</span></td>
+      <td><button class="btn-sm" style="padding:1px 6px;font-size:10px" onclick="dismissAlert(${a.id})">✕</button></td>
+    </tr>`).join('')}
+    </tbody></table>`;
+}
+
+async function dismissAlert(alertId){
+  await api(`/api/monitoring/alerts/history/${alertId}`,{method:'DELETE'});
+  loadAlertHistory();
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Instance Detail full-screen overlay
+// ──────────────────────────────────────────────────────────────────────────────
+function openMonDetail(id){
+  monHistInstId = null;
+  monHistMetric = 'cpu_pct';
+  monHistRange  = '1h';
+
+  const inst = monInstCache[id];
+  if(!inst) return;
+  const t = monitorThresholds;
+  const status = inst.status;
+  const dotCls  = 'dot-'+status;
+  const badgeCls = 'badge-'+status;
+
+  // Update header
+  const dot = document.getElementById('mon-detail-dot');
+  dot.className = 'mon-card-dot '+dotCls;
+  document.getElementById('mon-detail-title').textContent = inst.label;
+  document.getElementById('mon-detail-host').textContent  = inst.host;
+  const badge = document.getElementById('mon-detail-badge');
+  badge.className = 'mon-status-badge '+badgeCls;
+  badge.textContent = status;
+
+  const body = document.getElementById('mon-detail-body');
+
+  if(status === 'unreachable'){
+    body.innerHTML = `
+      <div class="mon-detail-section">
+        <div class="mon-detail-section-title">Connection Error</div>
+        <p style="color:var(--red);font-size:13px">${esc(inst.error||'SSH connection failed')}</p>
+      </div>`;
+    document.getElementById('mon-detail-overlay').classList.add('open');
+    return;
+  }
+
+  const m = inst.metrics||{};
+  const cpu  = m.cpu_pct;
+  const mem  = m.mem_pct;
+  const disk = m.disk_pct;
+  const cpuCol  = monMetricColor(cpu,  t.cpu_warn,  t.cpu_crit);
+  const memCol  = monMetricColor(mem,  t.mem_warn,  t.mem_crit);
+  const diskCol = monMetricColor(disk, t.disk_warn, t.disk_crit);
+  const memGB   = (m.mem_used_mb&&m.mem_total_mb)
+    ? `${(m.mem_used_mb/1024).toFixed(2)} / ${(m.mem_total_mb/1024).toFixed(2)} GB` : '—';
+  const diskGB  = (m.disk_used_kb&&m.disk_total_kb)
+    ? `${(m.disk_used_kb/1048576).toFixed(1)} / ${(m.disk_total_kb/1048576).toFixed(1)} GB` : '—';
+
+  // History section (chart filled async)
+  const histSection = `
+    <div class="mon-detail-section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem">
+        <span class="mon-detail-section-title" style="margin:0">Metric History</span>
+        <div style="display:flex;gap:4px;flex-wrap:wrap">
+          <div id="mon-hist-metric-tabs" style="display:flex;gap:2px">
+            <button class="btn-hist-tab active" data-metric="cpu_pct" onclick="switchHistMetric('cpu_pct')">CPU</button>
+            <button class="btn-hist-tab" data-metric="mem_pct" onclick="switchHistMetric('mem_pct')">Mem</button>
+            <button class="btn-hist-tab" data-metric="disk_pct" onclick="switchHistMetric('disk_pct')">Disk</button>
+            <button class="btn-hist-tab" data-metric="net_rx_kb" onclick="switchHistMetric('net_rx_kb')">Net RX</button>
+          </div>
+          <div id="mon-hist-range-tabs" style="display:flex;gap:2px;margin-left:4px">
+            <button class="btn-hist-tab active" data-range="1h" onclick="switchHistRange('1h')">1h</button>
+            <button class="btn-hist-tab" data-range="6h" onclick="switchHistRange('6h')">6h</button>
+            <button class="btn-hist-tab" data-range="24h" onclick="switchHistRange('24h')">24h</button>
+            <button class="btn-hist-tab" data-range="7d" onclick="switchHistRange('7d')">7d</button>
+          </div>
+        </div>
+      </div>
+      <div id="mon-hist-chart"></div>
+      <div id="mon-hist-stats" style="display:flex;gap:1.5rem;font-size:11px;color:var(--muted);margin-top:6px;padding-top:6px;border-top:1px solid var(--border)"></div>
+    </div>`;
+
+  // Metrics grid
+  const metricsSection = `
+    <div class="mon-detail-section">
+      <div class="mon-detail-section-title">System Metrics</div>
+      <div class="mon-detail-metrics-grid">
+        <div class="mon-detail-metric">
+          <div class="mon-detail-metric-val" style="color:${cpuCol}">${cpu??'—'}%</div>
+          <div class="mon-detail-metric-lbl">CPU Usage</div>
+        </div>
+        <div class="mon-detail-metric">
+          <div class="mon-detail-metric-val" style="color:${memCol};font-size:1.1rem">${memGB}</div>
+          <div class="mon-detail-metric-lbl">Memory</div>
+        </div>
+        <div class="mon-detail-metric">
+          <div class="mon-detail-metric-val" style="color:${diskCol};font-size:1.1rem">${diskGB}</div>
+          <div class="mon-detail-metric-lbl">Disk (/)</div>
+        </div>
+        <div class="mon-detail-metric">
+          <div class="mon-detail-metric-val" style="font-size:0.95rem">${esc(m.uptime_str||'—')}</div>
+          <div class="mon-detail-metric-lbl">Uptime</div>
+        </div>
+        <div class="mon-detail-metric">
+          <div class="mon-detail-metric-val" style="font-size:1rem">${esc(m.load_avg||'—')}</div>
+          <div class="mon-detail-metric-lbl">Load Average</div>
+        </div>
+        <div class="mon-detail-metric">
+          <div class="mon-detail-metric-val">${m.running_svc_count??'—'}</div>
+          <div class="mon-detail-metric-lbl">Running Services</div>
+        </div>
+        <div class="mon-detail-metric">
+          <div class="mon-detail-metric-val" style="color:${m.failed_svc_count>0?'var(--red)':'var(--green)'}">${m.failed_svc_count??'—'}</div>
+          <div class="mon-detail-metric-lbl">Failed Services</div>
+        </div>
+        <div class="mon-detail-metric">
+          <div class="mon-detail-metric-val" style="font-size:0.95rem">${fmtBytes(m.net_rx_bytes)} / ${fmtBytes(m.net_tx_bytes)}</div>
+          <div class="mon-detail-metric-lbl">Network RX / TX</div>
+        </div>
+      </div>
+    </div>`;
+
+  // Progress bars section
+  const barsSection = `
+    <div class="mon-detail-section">
+      <div class="mon-detail-section-title">Resource Utilisation</div>
+      <div class="mon-detail-bar-row">
+        <span class="mon-detail-bar-label">CPU</span>
+        <div class="mon-detail-bar-track"><div class="mon-detail-bar-fill" style="width:${Math.min(cpu||0,100)}%;background:${cpuCol}"></div></div>
+        <span class="mon-detail-bar-pct" style="color:${cpuCol}">${cpu??'—'}%</span>
+      </div>
+      <div class="mon-detail-bar-row">
+        <span class="mon-detail-bar-label">Memory</span>
+        <div class="mon-detail-bar-track"><div class="mon-detail-bar-fill" style="width:${Math.min(mem||0,100)}%;background:${memCol}"></div></div>
+        <span class="mon-detail-bar-pct" style="color:${memCol}">${mem??'—'}%</span>
+      </div>
+      <div class="mon-detail-bar-row">
+        <span class="mon-detail-bar-label">Disk</span>
+        <div class="mon-detail-bar-track"><div class="mon-detail-bar-fill" style="width:${Math.min(disk||0,100)}%;background:${diskCol}"></div></div>
+        <span class="mon-detail-bar-pct" style="color:${diskCol}">${disk??'—'}%</span>
+      </div>
+    </div>`;
+
+  // Services section
+  const svcs = m.key_services||{};
+  const svcPills = Object.entries(svcs).map(([name,state])=>{
+    const active = state==='active';
+    return`<span class="mon-detail-svc-pill ${active?'svc-active':'svc-inactive'}">${esc(name)}: ${esc(state)}</span>`;
+  }).join('');
+  const failedNames = m.failed_service_names||[];
+  const failWarn = failedNames.length
+    ? `<div class="failed-svc-warn" style="margin-top:8px;display:flex;flex-wrap:wrap;align-items:center;gap:6px">
+        <span>⚠ Failed services:</span>
+        ${failedNames.map(n=>`<span style="padding:2px 10px;border-radius:10px;font-size:11px;font-weight:600;background:#3d1a1a;color:#f85149;border:1px solid #f85149">${esc(n)}</span>`).join('')}
+      </div>`
+    : m.failed_svc_count>0
+      ? `<div class="failed-svc-warn" style="margin-top:8px">⚠ ${m.failed_svc_count} failed service${m.failed_svc_count>1?'s':''}</div>`
+      : '';
+  const svcsSection = `
+    <div class="mon-detail-section">
+      <div class="mon-detail-section-title">Key Services</div>
+      <div class="mon-detail-svc-grid">${svcPills||'<span style="color:var(--muted);font-size:12px">No data</span>'}</div>
+      ${failWarn}
+    </div>`;
+
+  // Top processes section
+  const topCpu = m.top_cpu_procs||[];
+  const topMem = m.top_mem_procs||[];
+  const cpuRows = topCpu.map(p=>`<tr><td title="${esc(p.name)}">${esc(p.name)}</td><td>${p.cpu}%</td><td>${p.mem}% mem</td></tr>`).join('');
+  const memRows = topMem.map(p=>`<tr><td title="${esc(p.name)}">${esc(p.name)}</td><td>${p.mem}%</td><td>${p.cpu}% cpu</td></tr>`).join('');
+  const procsSection = `
+    <div class="mon-detail-section">
+      <div class="mon-detail-section-title">Top Processes</div>
+      <div class="mon-detail-procs">
+        <div>
+          <div class="mon-detail-proc-title">By CPU</div>
+          ${cpuRows?`<table class="mon-detail-proc-table">${cpuRows}</table>`:'<span style="color:var(--muted);font-size:12px">No data</span>'}
+        </div>
+        <div>
+          <div class="mon-detail-proc-title">By Memory</div>
+          ${memRows?`<table class="mon-detail-proc-table">${memRows}</table>`:'<span style="color:var(--muted);font-size:12px">No data</span>'}
+        </div>
+      </div>
+    </div>`;
+
+  // Active alerts for this instance
+  const myAlerts = (inst.alerts||[]);
+  const alertsSection = myAlerts.length ? `
+    <div class="mon-detail-section mon-alerts-banner" style="margin-bottom:0">
+      <div class="mon-detail-section-title" style="color:var(--red)">Active Alerts</div>
+      ${myAlerts.map(a=>`
+        <div class="mon-alert-item">
+          <span class="badge ${a.severity==='critical'?'badge-critical':'badge-warning'}">${esc(a.severity)}</span>
+          <span>${esc(a.metric)}: ${a.value}${typeof a.value==='number'&&a.metric!=='Failed Services'?'%':''} (threshold ${a.threshold}${typeof a.threshold==='number'&&a.metric!=='Failed Services'?'%':''})</span>
+        </div>`).join('')}
+    </div>` : '';
+
+  body.innerHTML = alertsSection + histSection + metricsSection + barsSection + svcsSection + procsSection;
+  document.getElementById('mon-detail-overlay').classList.add('open');
+  monHistInstId = id;
+  loadMonHistoryForDetail(id);
+}
+
+function closeMonDetail(){
+  monHistInstId = null;
+  document.getElementById('mon-detail-overlay').classList.remove('open');
+}
+
+// Close detail overlay on Escape key
+document.addEventListener('keydown', e=>{
+  if(e.key==='Escape'){
+    if(document.getElementById('mon-detail-overlay').classList.contains('open')){
+      closeMonDetail();
+    }
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Init
+// ──────────────────────────────────────────────────────────────────────────────
+(async function init(){
+  await loadInstances();
+  await loadDashboard();
+  // Refresh instances every 30s
+  setInterval(async()=>{
+    await loadInstances();
+    if(activeTab==='dashboard') loadDashboard();
+  }, 30000);
+})();
+</script>
+</body>
+</html>
