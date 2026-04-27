@@ -912,6 +912,7 @@ async function startExplore(iid, msg){
   chatJobId = res.data.job_id;
   chatPlan = res.data.response;
   renderExploreResponse(chatPlan, chatJobId);
+  await autoRunExploreCmds(chatPlan, chatJobId);
 }
 
 function renderExploreResponse(resp, jobId){
@@ -943,6 +944,14 @@ async function runExploreCmd(jobId, idx, title, cmd, btn){
       <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(res.data.summary)}</div>`;
   } else {
     outEl.innerHTML=`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
+  }
+}
+
+async function autoRunExploreCmds(resp, jobId){
+  const cmds = resp.commands||[];
+  for(let i=0;i<cmds.length;i++){
+    const btn = document.querySelector(`#ecmd-${jobId}-${i} .step-exec-btn`);
+    if(btn) await runExploreCmd(jobId, i, cmds[i].title, cmds[i].cmd, btn);
   }
 }
 
