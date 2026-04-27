@@ -273,6 +273,10 @@ MONITORING_COMMANDS = {
         "printf '%s:%s\\n' \"$s\" \"$(systemctl is-active $s 2>/dev/null || echo inactive)\"; "
         "done"
     ),
+    "failed_svc_names": (
+        "systemctl list-units --type=service --state=failed"
+        " --no-legend 2>/dev/null | awk '{print $1}'"
+    ),
     "top_cpu": (
         "ps aux --sort=-%cpu 2>/dev/null | awk "
         "'NR>1&&NR<5{n=$11; sub(/.*\\//,\"\",n); printf \"%s %.1f %.1f\\n\",n,$3,$4}'"
@@ -372,6 +376,16 @@ def _parse_monitoring(raw: dict) -> dict:
             name, state = line.split(":", 1)
             key_svcs[name.strip()] = state.strip()
     result["key_services"] = key_svcs
+
+    # Failed service names (strip .service suffix for cleaner display)
+    failed_names: list = []
+    for line in raw.get("failed_svc_names", "").splitlines():
+        name = line.strip()
+        if name:
+            if name.endswith(".service"):
+                name = name[:-8]
+            failed_names.append(name)
+    result["failed_service_names"] = failed_names
 
     # Top processes by CPU (fields: name cpu% mem%)
     top_cpu: list = []
