@@ -2,6 +2,7 @@
 server.py — Flask REST API server for the Linux AI Infrastructure Agent.
 Listens on 0.0.0.0:7070.
 """
+import copy
 import json
 import logging
 import os
@@ -38,6 +39,13 @@ sessions_lock = threading.Lock()
 # {instance_id: [openai message dicts]}  — LLM context for the chat conversation
 instance_conversations: dict = {}
 instance_conversations_lock = threading.Lock()
+
+# ── flap-suppression state ────────────────────────────────────────────────────
+# Keeps the last known-good metrics dict so transient SSH failures don't
+# immediately flip a card to "unreachable".
+_last_good_metrics: dict = {}   # {instance_id: metrics_dict}
+_fail_counts: dict = {}         # {instance_id: consecutive_failure_count}
+FAIL_THRESHOLD = 3              # flips to unreachable after 3 straight failures
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -1154,13 +1162,41 @@ def get_monitoring():
 
     for inst in instances:
         iid = inst["id"]
-        if iid in poll_errors:
+
+        # ── Determine whether this poll succeeded or failed ──────────────────
+        if iid not in poll_errors:
+            # SUCCESS — reset fail counter and update cache
+            _fail_counts[iid] = 0
+            raw = poll_results.get(iid, {})
+            _last_good_metrics[iid] = raw
+            metrics = raw
+            metrics["stale"] = False
+            use_metrics = True
+        else:
+            # FAILURE — apply flap-suppression logic
+            _fail_counts[iid] = _fail_counts.get(iid, 0) + 1
+            if _fail_counts[iid] < FAIL_THRESHOLD:
+                cached = _last_good_metrics.get(iid)
+                if cached:
+                    metrics = copy.deepcopy(cached)
+                    metrics["stale"] = True
+                    use_metrics = True
+                else:
+                    # No cache yet — first-ever poll failed
+                    use_metrics = False
+            else:
+                # Threshold reached — evict cache, show as unreachable
+                _last_good_metrics.pop(iid, None)
+                use_metrics = False
+
+        if not use_metrics:
             inst_data.append({
                 "id": iid,
                 "label": inst["label"],
                 "host": inst["host"],
                 "status": "unreachable",
-                "error": poll_errors[iid],
+                "stale": False,
+                "error": poll_errors.get(iid, "SSH connection failed"),
                 "metrics": None,
                 "alerts": [],
             })
@@ -1169,27 +1205,29 @@ def get_monitoring():
             except Exception:
                 pass
             offline_count += 1
+            continue
+
+        # ── Instance is reachable (or served from cache) ─────────────────────
+
+        # Check for an active maintenance window
+        maint = None
+        try:
+            maint = db.get_active_maintenance_window(iid)
+        except Exception:
+            pass
+
+        if maint:
+            status = "maintenance"
+            inst_alerts = []
         else:
-            metrics = poll_results.get(iid, {})
+            status, inst_alerts = _compute_health(metrics, thresholds)
+            for a in inst_alerts:
+                a["instance_id"] = iid
+                a["instance_label"] = inst["label"]
+            all_alerts.extend(inst_alerts)
 
-            # Check for an active maintenance window
-            maint = None
-            try:
-                maint = db.get_active_maintenance_window(iid)
-            except Exception:
-                pass
-
-            if maint:
-                status = "maintenance"
-                inst_alerts = []
-            else:
-                status, inst_alerts = _compute_health(metrics, thresholds)
-                for a in inst_alerts:
-                    a["instance_id"] = iid
-                    a["instance_label"] = inst["label"]
-                all_alerts.extend(inst_alerts)
-
-                # Persist alert history
+            # Persist alert history (only for fresh data, not stale)
+            if not metrics.get("stale"):
                 active_metrics: set = set()
                 for a in inst_alerts:
                     try:
@@ -1205,7 +1243,8 @@ def get_monitoring():
                 except Exception:
                     pass
 
-            # Store metrics snapshot
+        # Store metrics snapshot (only for fresh data)
+        if not metrics.get("stale"):
             m = metrics
             net_rx_kb = (m.get("net_rx_bytes") or 0) / 1024.0
             net_tx_kb = (m.get("net_tx_bytes") or 0) / 1024.0
@@ -1219,19 +1258,20 @@ def get_monitoring():
             except Exception:
                 pass
 
-            if metrics.get("cpu_pct") is not None:
-                cpu_vals.append(metrics["cpu_pct"])
-            if metrics.get("mem_pct") is not None:
-                mem_vals.append(metrics["mem_pct"])
-            online_count += 1
-            inst_data.append({
-                "id": iid,
-                "label": inst["label"],
-                "host": inst["host"],
-                "status": status,
-                "metrics": metrics,
-                "alerts": inst_alerts,
-            })
+        if metrics.get("cpu_pct") is not None:
+            cpu_vals.append(metrics["cpu_pct"])
+        if metrics.get("mem_pct") is not None:
+            mem_vals.append(metrics["mem_pct"])
+        online_count += 1
+        inst_data.append({
+            "id": iid,
+            "label": inst["label"],
+            "host": inst["host"],
+            "status": status,
+            "stale": bool(metrics.get("stale")),
+            "metrics": metrics,
+            "alerts": inst_alerts,
+        })
 
     # Purge metrics older than 7 days
     try:

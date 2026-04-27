@@ -1817,7 +1817,7 @@ function renderMonCard(inst, t){
     <div class="mon-card-header">
       <div class="mon-card-dot ${dotCls}"></div>
       <strong style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(inst.label)}</strong>
-      <span class="mon-status-badge ${badgeCls}">${esc(status)}</span>
+      <span class="mon-status-badge ${badgeCls}">${esc(status)}</span>${inst.stale?'<span style="margin-left:4px;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:600;background:#1c2128;color:#d29922;border:1px solid #d29922">STALE</span>':''}
     </div>
     <div style="font-size:11px;color:var(--muted)">${esc(inst.host)}</div>
     <div class="mon-metrics-row">${metricCells}</div>
