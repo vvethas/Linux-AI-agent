@@ -407,11 +407,21 @@ def _parse_monitoring(raw: dict) -> dict:
 
 
 def collect_monitoring(instance: dict) -> dict:
-    """Collect real-time monitoring metrics from an instance via SSH."""
+    """Collect real-time monitoring metrics from an instance via SSH.
+
+    Raises on connection failure so callers can apply flap-suppression logic.
+    Per-command failures are still silently tolerated (partial data is fine).
+    """
+    # Pre-flight: establish / validate the connection.  Any exception here
+    # (AuthenticationException, socket.timeout, etc.) intentionally propagates
+    # to the caller so it can distinguish a true SSH failure from a successful
+    # poll that simply returned partial data.
+    get_client(instance)
+
     raw: dict = {}
     for key, cmd in MONITORING_COMMANDS.items():
         try:
-            stdout, stderr, _ = run_command(instance, cmd, timeout=20)
+            stdout, stderr, _ = run_command(instance, cmd, timeout=30)
             raw[key] = stdout.strip() or stderr.strip()
         except Exception as exc:
             raw[key] = ""
