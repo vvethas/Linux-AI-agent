@@ -1011,35 +1011,17 @@ function renderTroubleshootPlan(plan, jobId){
 }
 
 async function execStep(jobId, stepId, btn){
-  // Ask for inline confirmation first
-  const row = btn.parentElement;
-  const confirmRow = document.createElement('div');
-  confirmRow.className='confirm-row';
-  confirmRow.innerHTML=`<span style="font-size:12px;color:var(--yellow)">⚠ Run this step?</span>
-    <button class="confirm-yes">Yes, Run</button>
-    <button class="confirm-no">Cancel</button>`;
-  row.insertAdjacentElement('afterend', confirmRow);
-  btn.disabled=true;
-
-  await new Promise(resolve=>{
-    confirmRow.querySelector('.confirm-yes').onclick = async ()=>{
-      confirmRow.remove(); btn.textContent='Running…';
-      const res = await api('/api/execute_step',{method:'POST',body:JSON.stringify({job_id:parseInt(jobId),step_id:stepId})});
-      btn.textContent='Done';
-      const outEl = document.getElementById(`step-out-${jobId}-${stepId}`);
-      outEl.style.display='';
-      if(res.ok){
-        outEl.innerHTML=`<div class="step-output">${esc(res.data.output)}</div>
-          <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(res.data.summary)}</div>`;
-      } else {
-        outEl.innerHTML=`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
-      }
-      resolve();
-    };
-    confirmRow.querySelector('.confirm-no').onclick = ()=>{
-      confirmRow.remove(); btn.disabled=false; resolve();
-    };
-  });
+  btn.disabled=true; btn.textContent='Running…';
+  const res = await api('/api/execute_step',{method:'POST',body:JSON.stringify({job_id:parseInt(jobId),step_id:stepId})});
+  btn.textContent='Done';
+  const outEl = document.getElementById(`step-out-${jobId}-${stepId}`);
+  outEl.style.display='';
+  if(res.ok){
+    outEl.innerHTML=`<div class="step-output">${esc(res.data.output)}</div>
+      <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(res.data.summary)}</div>`;
+  } else {
+    outEl.innerHTML=`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
+  }
 }
 
 async function runVerify(jobId){
@@ -1101,35 +1083,18 @@ function renderBuildPlan(plan, jobId){
 }
 
 async function execBuildStep(jobId, phaseId, stepId, btn){
-  const row = btn.parentElement;
-  const confirmRow = document.createElement('div');
-  confirmRow.className='confirm-row';
-  confirmRow.innerHTML=`<span style="font-size:12px;color:var(--yellow)">⚠ Run this step?</span>
-    <button class="confirm-yes">Yes, Run</button>
-    <button class="confirm-no">Cancel</button>`;
-  row.insertAdjacentElement('afterend', confirmRow);
-  btn.disabled=true;
-
-  await new Promise(resolve=>{
-    confirmRow.querySelector('.confirm-yes').onclick = async ()=>{
-      confirmRow.remove(); btn.textContent='Running…';
-      const res = await api('/api/build/execute_step',{method:'POST',
-        body:JSON.stringify({job_id:parseInt(jobId),phase_id:phaseId,step_id:stepId})});
-      btn.textContent='Done';
-      const outEl = document.getElementById(`bstep-out-${jobId}-${phaseId}-${stepId}`);
-      outEl.style.display='';
-      if(res.ok){
-        outEl.innerHTML=`<div class="step-output">${esc(res.data.output)}</div>
-          <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(res.data.summary)}</div>`;
-      } else {
-        outEl.innerHTML=`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
-      }
-      resolve();
-    };
-    confirmRow.querySelector('.confirm-no').onclick = ()=>{
-      confirmRow.remove(); btn.disabled=false; resolve();
-    };
-  });
+  btn.disabled=true; btn.textContent='Running…';
+  const res = await api('/api/build/execute_step',{method:'POST',
+    body:JSON.stringify({job_id:parseInt(jobId),phase_id:phaseId,step_id:stepId})});
+  btn.textContent='Done';
+  const outEl = document.getElementById(`bstep-out-${jobId}-${phaseId}-${stepId}`);
+  outEl.style.display='';
+  if(res.ok){
+    outEl.innerHTML=`<div class="step-output">${esc(res.data.output)}</div>
+      <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(res.data.summary)}</div>`;
+  } else {
+    outEl.innerHTML=`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
+  }
 }
 
 async function runPostInstall(jobId){
@@ -1181,35 +1146,18 @@ function renderConfigurePlan(plan, jobId){
 }
 
 async function execConfigureStep(jobId, stepId, btn){
-  const row = btn.parentElement;
-  const confirmRow = document.createElement('div');
-  confirmRow.className='confirm-row';
-  confirmRow.innerHTML=`<span style="font-size:12px;color:var(--yellow)">⚠ Apply this configuration change?</span>
-    <button class="confirm-yes">Yes, Apply</button>
-    <button class="confirm-no">Cancel</button>`;
-  row.insertAdjacentElement('afterend', confirmRow);
-  btn.disabled=true;
-
-  await new Promise(resolve=>{
-    confirmRow.querySelector('.confirm-yes').onclick = async ()=>{
-      confirmRow.remove(); btn.textContent='Running…';
-      const res = await api('/api/configure/execute_step',{method:'POST',
-        body:JSON.stringify({job_id:parseInt(jobId),step_id:stepId})});
-      btn.textContent='Done';
-      const outEl = document.getElementById(`cfgstep-out-${jobId}-${stepId}`);
-      outEl.style.display='';
-      if(res.ok){
-        outEl.innerHTML=`<div class="step-output">${esc(res.data.output)}</div>
-          <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(res.data.summary)}</div>`;
-      } else {
-        outEl.innerHTML=`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
-      }
-      resolve();
-    };
-    confirmRow.querySelector('.confirm-no').onclick = ()=>{
-      confirmRow.remove(); btn.disabled=false; resolve();
-    };
-  });
+  btn.disabled=true; btn.textContent='Running…';
+  const res = await api('/api/configure/execute_step',{method:'POST',
+    body:JSON.stringify({job_id:parseInt(jobId),step_id:stepId})});
+  btn.textContent='Done';
+  const outEl = document.getElementById(`cfgstep-out-${jobId}-${stepId}`);
+  outEl.style.display='';
+  if(res.ok){
+    outEl.innerHTML=`<div class="step-output">${esc(res.data.output)}</div>
+      <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(res.data.summary)}</div>`;
+  } else {
+    outEl.innerHTML=`<div style="color:var(--red);font-size:12px">${esc(res.error)}</div>`;
+  }
 }
 
 async function runConfigureVerify(jobId){
