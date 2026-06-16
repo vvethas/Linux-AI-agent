@@ -834,8 +834,8 @@
     <span class="topbar-spacer"></span>
 
     <div class="toggle-group">
-      <button class="toggle-btn active">Auto</button>
-      <button class="toggle-btn">Manual</button>
+      <button id="btn-auto" class="toggle-btn active">Auto</button>
+      <button id="btn-manual" class="toggle-btn">Manual</button>
     </div>
 
     <div class="topbar-actions">
@@ -1041,5 +1041,101 @@ Jun 16 14:10:03 web-server-01 systemd[1]: redis.service: Failed with result 'exi
   </div><!-- /main -->
 
 </div><!-- /app -->
+
+<script>
+(function () {
+  'use strict';
+
+  var btnAuto      = document.getElementById('btn-auto');
+  var btnManual    = document.getElementById('btn-manual');
+  var chatMessages = document.querySelector('.chat-messages');
+
+  var eventSource = null;
+
+  /* ── SSE connection ──────────────────────────────────────────────── */
+
+  function connectSSE() {
+    if (eventSource) return;
+    eventSource = new EventSource('/api/events');
+
+    eventSource.addEventListener('auto_diagnosis', function (e) {
+      try {
+        var data = JSON.parse(e.data);
+        renderAutoDiagnosis(data);
+      } catch (_) {}
+    });
+  }
+
+  function disconnectSSE() {
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+  }
+
+  /* ── Render an auto_diagnosis event into the chat ────────────────── */
+
+  function renderAutoDiagnosis(data) {
+    var now     = new Date();
+    var hours   = String(now.getHours()).padStart(2, '0');
+    var minutes = String(now.getMinutes()).padStart(2, '0');
+    var timeStr = hours + ':' + minutes;
+
+    var fixItems = (data.fix_steps || [])
+      .map(function (s) { return '<li>' + escHtml(s) + '</li>'; })
+      .join('');
+
+    var row = document.createElement('div');
+    row.className = 'msg-row';
+    row.innerHTML =
+      '<div class="msg-avatar agent">⚡</div>' +
+      '<div>' +
+        '<div class="msg-bubble">' +
+          '<p><strong>🔴 Auto-detected issue on ' + escHtml(data.instance) + ':</strong> ' +
+          escHtml(data.issue) + '</p>' +
+          '<p style="margin-top:8px"><strong>Diagnosis:</strong> ' + escHtml(data.diagnosis) + '</p>' +
+          (fixItems
+            ? '<ol style="margin-top:8px;padding-left:1.4em">' + fixItems + '</ol>'
+            : '') +
+        '</div>' +
+        '<div class="msg-time">' + timeStr + '</div>' +
+      '</div>';
+
+    /* Insert before typing indicator if present, otherwise append */
+    var typing = chatMessages.querySelector('.typing-indicator');
+    if (typing) {
+      chatMessages.insertBefore(row, typing);
+    } else {
+      chatMessages.appendChild(row);
+    }
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  /* ── Toggle buttons ──────────────────────────────────────────────── */
+
+  btnAuto.addEventListener('click', function () {
+    btnAuto.classList.add('active');
+    btnManual.classList.remove('active');
+    connectSSE();
+  });
+
+  btnManual.addEventListener('click', function () {
+    btnManual.classList.add('active');
+    btnAuto.classList.remove('active');
+    disconnectSSE();
+  });
+
+  /* Auto mode is active by default – connect immediately */
+  connectSSE();
+}());
+</script>
 </body>
 </html>

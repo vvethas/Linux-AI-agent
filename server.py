@@ -7,10 +7,14 @@ import hashlib
 import json
 import logging
 import os
+import queue
 import sqlite3
+import subprocess
+import threading
+import time
 from datetime import datetime, timezone
 
-from flask import Flask, g, jsonify, request
+from flask import Flask, Response, g, jsonify, request, stream_with_context
 from openai import OpenAI
 
 app = Flask(__name__)
@@ -121,6 +125,42 @@ def _call_openai(instance: str, issue: str) -> dict:
         fix_steps = [str(fix_steps)]
 
     return {"diagnosis": diagnosis, "fix_steps": fix_steps}
+
+
+# ── SSE broadcast ──────────────────────────────────────────────────────────────
+
+_subscribers: set = set()
+_subscribers_lock = threading.Lock()
+
+
+def _broadcast(event_type: str, data: dict) -> None:
+    """Push an SSE message to all connected /api/events clients."""
+    msg = f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+    with _subscribers_lock:
+        dead: set = set()
+        for q in _subscribers:
+            try:
+                q.put_nowait(msg)
+            except queue.Full:
+                dead.add(q)
+        _subscribers -= dead
+
+
+def _sse_stream():
+    """Generator that yields SSE-formatted strings for one connected client."""
+    q: queue.Queue = queue.Queue(maxsize=50)
+    with _subscribers_lock:
+        _subscribers.add(q)
+    try:
+        yield 'data: {"type":"connected"}\n\n'
+        while True:
+            try:
+                yield q.get(timeout=25)
+            except queue.Empty:
+                yield ": keepalive\n\n"
+    finally:
+        with _subscribers_lock:
+            _subscribers.discard(q)
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -309,9 +349,151 @@ def knowledge():
     )
 
 
+@app.get("/api/events")
+def events():
+    """
+    Server-Sent Events stream for real-time auto-diagnosis notifications.
+
+    Clients receive an initial ``connected`` keepalive and then
+    ``auto_diagnosis`` events whenever the background poller detects a
+    failed systemd service and obtains an AI diagnosis.
+
+    Event format::
+
+        event: auto_diagnosis
+        data: {"instance": "...", "issue": "...", "diagnosis": "...",
+               "fix_steps": [...], "source": "new"|"cache", "timestamp": "..."}
+    """
+    return Response(
+        stream_with_context(_sse_stream()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ── Background service poller ──────────────────────────────────────────────────
+
+def _get_failed_services() -> list:
+    """Return names of failed systemd units; returns [] if systemctl is absent."""
+    try:
+        result = subprocess.run(
+            ["systemctl", "list-units", "--state=failed", "--no-legend", "--plain"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        services = []
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if parts:
+                services.append(parts[0])
+        return services
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _poll_failed_services() -> None:
+    """
+    Background daemon thread: every 60 s check for failed systemd services,
+    auto-diagnose new ones via OpenAI, and broadcast ``auto_diagnosis`` SSE
+    events to all connected clients.
+    """
+    instance = os.environ.get("AGENT_INSTANCE", "localhost")
+    while True:
+        time.sleep(60)
+        failed = _get_failed_services()
+        for service in failed:
+            issue = f"systemd service '{service}' is in a failed state"
+            fp = _fingerprint(instance, issue)
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+
+            # Use a direct connection – this runs outside a Flask request context.
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute(
+                    "SELECT * FROM knowledge WHERE fingerprint = ? LIMIT 1", (fp,)
+                ).fetchone()
+
+            if row is not None:
+                # Already diagnosed – broadcast the cached result.
+                fix_steps = []
+                if row["fix_steps"]:
+                    try:
+                        fix_steps = json.loads(row["fix_steps"])
+                    except (json.JSONDecodeError, TypeError):
+                        fix_steps = []
+                _broadcast(
+                    "auto_diagnosis",
+                    {
+                        "instance": instance,
+                        "issue": issue,
+                        "diagnosis": row["diagnosis"],
+                        "fix_steps": fix_steps,
+                        "source": "cache",
+                        "timestamp": now,
+                    },
+                )
+            else:
+                try:
+                    ai_result = _call_openai(instance, issue)
+                except Exception:  # noqa: BLE001
+                    logging.exception(
+                        "Auto-diagnosis failed for service=%s", service
+                    )
+                    continue
+
+                diagnosis = ai_result["diagnosis"]
+                fix_steps = ai_result["fix_steps"]
+
+                with sqlite3.connect(DB_PATH) as conn:
+                    conn.execute(
+                        """
+                        INSERT INTO knowledge
+                            (instance, issue, diagnosis, fingerprint,
+                             fix_steps, seen_count, last_seen)
+                        VALUES (?, ?, ?, ?, ?, 1, ?)
+                        """,
+                        (
+                            instance,
+                            issue,
+                            diagnosis,
+                            fp,
+                            json.dumps(fix_steps),
+                            now,
+                        ),
+                    )
+                    conn.commit()
+
+                _broadcast(
+                    "auto_diagnosis",
+                    {
+                        "instance": instance,
+                        "issue": issue,
+                        "diagnosis": diagnosis,
+                        "fix_steps": fix_steps,
+                        "source": "new",
+                        "timestamp": now,
+                    },
+                )
+
+
 # ── Startup ────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     init_db()
     debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+    # Start the background poller only in the process that actually serves
+    # requests.  When debug/reloader is active, werkzeug sets WERKZEUG_RUN_MAIN
+    # to "true" in the child; the parent (file-watcher) must not start the
+    # thread so it isn't duplicated after a reload.
+    if not debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        poller = threading.Thread(
+            target=_poll_failed_services,
+            daemon=True,
+            name="service-poller",
+        )
+        poller.start()
     app.run(debug=debug, host="0.0.0.0", port=5000)
