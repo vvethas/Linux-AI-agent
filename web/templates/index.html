@@ -1130,10 +1130,13 @@ function initHoverNav() {
   const strip = document.getElementById('hoverStrip');
   const nav = document.getElementById('hoverNav');
   let leaveTimer = null;
-  wrap.addEventListener('mouseenter', () => {
+  strip.addEventListener('mouseenter', () => {
     clearTimeout(leaveTimer);
     strip.style.opacity = '1';
     nav.style.height = '54px';
+  });
+  nav.addEventListener('mouseenter', () => {
+    clearTimeout(leaveTimer);
   });
   wrap.addEventListener('mouseleave', () => {
     leaveTimer = setTimeout(() => {
@@ -1148,10 +1151,10 @@ function initKeyboardShortcuts() {
   const tabOrder = ['dashboard','chat','jobs','studies','alerts','settings'];
   const tabLabels = { dashboard:'Board', chat:'Chat', jobs:'Jobs', studies:'Studies', alerts:'Alerts', settings:'Settings' };
   document.addEventListener('keydown', e => {
-    if (e.ctrlKey && e.key === 'Tab') {
+    if (e.ctrlKey && e.shiftKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
       e.preventDefault();
       const cur = tabOrder.indexOf(currentTab);
-      const next = e.shiftKey
+      const next = e.key === 'ArrowLeft'
         ? (cur - 1 + tabOrder.length) % tabOrder.length
         : (cur + 1) % tabOrder.length;
       switchTab(tabOrder[next]);
