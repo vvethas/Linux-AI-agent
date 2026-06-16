@@ -10,13 +10,21 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+import hashlib
 import json
+import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request
+
+try:
+    from openai import OpenAI as _OpenAIClient
+    _openai = _OpenAIClient(api_key=os.getenv("OPENAI_API_KEY", ""))
+except Exception:
+    _openai = None
 
 from agent.core import ClaudeClient
 from agent.db import Database
@@ -30,6 +38,35 @@ from agent.study import StudyRunner
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+KB_DB = DATA_DIR / "knowledge_base.db"
+
+
+def _kb_conn() -> sqlite3.Connection:
+    conn = sqlite3.connect(str(KB_DB))
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _kb_setup() -> None:
+    with _kb_conn() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS knowledge_base (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fingerprint TEXT UNIQUE NOT NULL,
+            instance_id TEXT NOT NULL,
+            instance_host TEXT,
+            problem TEXT NOT NULL,
+            diagnosis TEXT NOT NULL,
+            fix_steps TEXT NOT NULL,
+            seen_count INTEGER DEFAULT 1,
+            first_seen TEXT NOT NULL,
+            last_seen TEXT NOT NULL,
+            fix_confirmed INTEGER DEFAULT 0
+        )""")
+        conn.commit()
+
+
+_kb_setup()
 
 app = Flask(__name__, template_folder=str(BASE_DIR / "web" / "templates"))
 
@@ -246,8 +283,8 @@ def classify():
 
 # ── Troubleshoot ──────────────────────────────────────────────────────────────
 
-@app.route("/api/diagnose", methods=["POST"])
-def diagnose():
+@app.route("/api/diagnose/plan", methods=["POST"])
+def diagnose_plan():
     payload = request.get_json(force=True) or {}
     instance_id = payload.get("instance_id")
     if not instance_id:
@@ -279,7 +316,135 @@ def diagnose():
     return jsonify({"job_id": job_id, "plan": plan, "diagnostics": diagnostics})
 
 
-@app.route("/api/execute_step", methods=["POST"])
+# ── AI diagnostic (OpenAI knowledge-base) ────────────────────────────────────
+
+@app.route("/api/diagnose", methods=["POST"])
+def ai_diagnose():
+    payload = request.get_json(force=True) or {}
+    instance_id = str(payload.get("instance_id", ""))
+    problem = str(payload.get("problem", ""))
+    context = str(payload.get("context", ""))
+    if not instance_id or not problem:
+        return _err("missing instance_id or problem")
+
+    fingerprint = hashlib.sha256((instance_id + problem).encode()).hexdigest()[:16]
+    now = datetime.now(timezone.utc).isoformat()
+
+    with _kb_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM knowledge_base WHERE fingerprint=?", (fingerprint,)
+        ).fetchone()
+        if row:
+            new_count = row["seen_count"] + 1
+            conn.execute(
+                "UPDATE knowledge_base SET seen_count=?, last_seen=? WHERE fingerprint=?",
+                (new_count, now, fingerprint),
+            )
+            conn.commit()
+            return jsonify({
+                "source": "cache",
+                "fingerprint": fingerprint,
+                "diagnosis": row["diagnosis"],
+                "fix_steps": json.loads(row["fix_steps"]),
+                "seen_count": new_count,
+                "last_seen": now,
+            })
+
+    if not _openai:
+        return _err("OpenAI not configured", 503)
+
+    try:
+        resp = _openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a Linux systems diagnostic expert. "
+                        "Respond with JSON containing exactly two keys: "
+                        "\"diagnosis\" (a concise string) and "
+                        "\"fix_steps\" (an array of action strings)."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Instance: {instance_id}\nProblem: {problem}\nContext: {context}",
+                },
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.2,
+        )
+        result = json.loads(resp.choices[0].message.content)
+    except Exception as exc:
+        log.exception("OpenAI error")
+        return _safe_err(exc, 503)
+
+    diagnosis = str(result.get("diagnosis", ""))
+    fix_steps = list(result.get("fix_steps", []))
+
+    instance = _get_instance(int(instance_id)) if instance_id.isdigit() else None
+    with _kb_conn() as conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO knowledge_base
+               (fingerprint, instance_id, instance_host, problem, diagnosis,
+                fix_steps, seen_count, first_seen, last_seen, fix_confirmed)
+               VALUES (?,?,?,?,?,?,1,?,?,0)""",
+            (
+                fingerprint, instance_id,
+                instance["host"] if instance else None,
+                problem, diagnosis, json.dumps(fix_steps), now, now,
+            ),
+        )
+        conn.commit()
+
+    return jsonify({
+        "source": "new",
+        "fingerprint": fingerprint,
+        "diagnosis": diagnosis,
+        "fix_steps": fix_steps,
+        "seen_count": 1,
+        "last_seen": now,
+    })
+
+
+@app.route("/api/diagnose/confirm", methods=["POST"])
+def ai_diagnose_confirm():
+    payload = request.get_json(force=True) or {}
+    fingerprint = str(payload.get("fingerprint", ""))
+    if not fingerprint:
+        return _err("missing fingerprint")
+    with _kb_conn() as conn:
+        conn.execute(
+            "UPDATE knowledge_base SET fix_confirmed=1 WHERE fingerprint=?",
+            (fingerprint,),
+        )
+        conn.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/knowledge", methods=["GET"])
+def knowledge_base_list():
+    with _kb_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM knowledge_base ORDER BY last_seen DESC"
+        ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/events", methods=["GET"])
+def sse_events():
+    def generate():
+        while True:
+            time.sleep(15)
+            yield "event: ping\ndata: {}\n\n"
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+
 def execute_step():
     payload = request.get_json(force=True) or {}
     job_id = payload.get("job_id")
