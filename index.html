@@ -1,0 +1,1045 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Linux AI Agent</title>
+  <style>
+    /* ── Reset & Base ─────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-base:       #0e1117;
+      --bg-surface:    #161b27;
+      --bg-raised:     #1e2535;
+      --bg-hover:      #252d40;
+      --bg-active:     #2a3349;
+      --border:        #2c3651;
+      --teal:          #00c4b4;
+      --teal-dim:      #00998c;
+      --teal-glow:     rgba(0,196,180,.15);
+      --blue:          #4d8eff;
+      --blue-dim:      #2d6ee0;
+      --text-primary:  #e4e9f2;
+      --text-secondary:#8a96b0;
+      --text-muted:    #505a74;
+      --green:         #3dd68c;
+      --yellow:        #f5b944;
+      --red:           #f4606c;
+      --radius-sm:     4px;
+      --radius-md:     8px;
+      --radius-lg:     12px;
+      --font:          'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+      --font-mono:     'SF Mono', 'Consolas', 'Menlo', monospace;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg-base);
+      color: var(--text-primary);
+      font-family: var(--font);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    /* ── App Shell ────────────────────────────────────────────────── */
+    .app {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      grid-template-rows: 48px 1fr;
+      grid-template-areas:
+        "sidebar topbar"
+        "sidebar main";
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar ──────────────────────────────────────────────────── */
+    .sidebar {
+      grid-area: sidebar;
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .sidebar-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .logo-icon {
+      width: 26px;
+      height: 26px;
+      background: linear-gradient(135deg, var(--teal), var(--blue));
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+
+    .logo-text {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: .3px;
+    }
+
+    .sidebar-section {
+      padding: 10px 12px 4px;
+      flex-shrink: 0;
+    }
+
+    .sidebar-section-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .8px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      padding: 0 4px;
+      margin-bottom: 4px;
+    }
+
+    .instance-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 8px 8px;
+    }
+
+    .instance-list::-webkit-scrollbar { width: 4px; }
+    .instance-list::-webkit-scrollbar-track { background: transparent; }
+    .instance-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .instance-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: background .15s;
+      user-select: none;
+    }
+
+    .instance-item:hover  { background: var(--bg-hover); }
+    .instance-item.active { background: var(--bg-active); }
+    .instance-item.active .instance-name { color: var(--teal); }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-dot.online  { background: var(--green);  box-shadow: 0 0 5px var(--green); }
+    .status-dot.offline { background: var(--text-muted); }
+    .status-dot.warning { background: var(--yellow); box-shadow: 0 0 5px var(--yellow); }
+
+    .instance-info { flex: 1; min-width: 0; }
+
+    .instance-name {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .instance-ip {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+
+    .instance-tag {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 10px;
+      letter-spacing: .4px;
+      flex-shrink: 0;
+    }
+    .instance-tag.prod { background: rgba(244,96,108,.15); color: var(--red); }
+    .instance-tag.dev  { background: rgba(77,142,255,.15);  color: var(--blue); }
+
+    .sidebar-footer {
+      padding: 10px 12px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #3b4f7a, #4d6aa3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-primary);
+      flex-shrink: 0;
+    }
+
+    .user-info { flex: 1; min-width: 0; }
+
+    .user-name {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .user-role {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    /* ── Topbar ───────────────────────────────────────────────────── */
+    .topbar {
+      grid-area: topbar;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 20px;
+    }
+
+    .topbar-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .ip-badge {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 3px 8px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--teal);
+    }
+
+    .ip-badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 4px var(--green);
+    }
+
+    .topbar-spacer { flex: 1; }
+
+    .toggle-group {
+      display: flex;
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+    }
+
+    .toggle-btn {
+      padding: 5px 14px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      transition: background .15s, color .15s;
+      user-select: none;
+    }
+
+    .toggle-btn.active {
+      background: var(--teal);
+      color: #0e1117;
+      font-weight: 600;
+    }
+
+    .topbar-actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    .icon-btn {
+      width: 30px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--bg-raised);
+      cursor: pointer;
+      color: var(--text-secondary);
+      font-size: 14px;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+
+    .icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); border-color: var(--teal-dim); }
+
+    /* ── Main Area ────────────────────────────────────────────────── */
+    .main {
+      grid-area: main;
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      overflow: hidden;
+    }
+
+    /* ── Metrics Column ───────────────────────────────────────────── */
+    .metrics-col {
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+
+    .metrics-col::-webkit-scrollbar { width: 4px; }
+    .metrics-col::-webkit-scrollbar-track { background: transparent; }
+    .metrics-col::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .metrics-section { padding: 14px 12px 0; }
+    .metrics-section:last-child { padding-bottom: 14px; }
+
+    .metrics-section-title {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .7px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    /* Metric Card */
+    .metric-card {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 10px 12px;
+      margin-bottom: 8px;
+    }
+
+    .metric-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+
+    .metric-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    .metric-icon { font-size: 13px; }
+
+    .metric-value {
+      font-size: 18px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      color: var(--text-primary);
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+
+    .metric-value .unit {
+      font-size: 11px;
+      font-weight: 400;
+      color: var(--text-secondary);
+      margin-left: 2px;
+    }
+
+    /* Progress bar */
+    .progress-bar {
+      height: 3px;
+      background: var(--bg-hover);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width .3s ease;
+    }
+
+    .progress-fill.low    { background: var(--green); }
+    .progress-fill.medium { background: var(--yellow); }
+    .progress-fill.high   { background: var(--red); }
+
+    .metric-sub {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* Uptime card */
+    .uptime-card {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .uptime-icon {
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    .uptime-info { flex: 1; min-width: 0; }
+
+    .uptime-value {
+      font-size: 13px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      color: var(--green);
+    }
+
+    .uptime-label {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    /* Services list */
+    .service-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .service-item:last-child { border-bottom: none; }
+
+    .service-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .service-name {
+      flex: 1;
+      font-size: 12px;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .service-status {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    /* ── Chat Column ──────────────────────────────────────────────── */
+    .chat-col {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--bg-base);
+    }
+
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .chat-messages::-webkit-scrollbar { width: 4px; }
+    .chat-messages::-webkit-scrollbar-track { background: transparent; }
+    .chat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* Welcome banner */
+    .welcome-banner {
+      background: linear-gradient(135deg, rgba(0,196,180,.08), rgba(77,142,255,.08));
+      border: 1px solid rgba(0,196,180,.2);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .welcome-banner-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .welcome-banner-sub {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    .welcome-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 4px;
+    }
+
+    .chip {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 12px;
+      color: var(--teal);
+      cursor: pointer;
+      transition: background .15s, border-color .15s;
+    }
+
+    .chip:hover { background: var(--teal-glow); border-color: var(--teal-dim); }
+
+    /* Chat message bubbles */
+    .msg-row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+
+    .msg-row.user { flex-direction: row-reverse; }
+
+    .msg-avatar {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .msg-avatar.agent {
+      background: linear-gradient(135deg, var(--teal-dim), var(--blue-dim));
+      color: #fff;
+      font-size: 14px;
+    }
+
+    .msg-avatar.user {
+      background: linear-gradient(135deg, #3b4f7a, #4d6aa3);
+      color: var(--text-primary);
+      font-size: 11px;
+    }
+
+    .msg-bubble {
+      max-width: 72%;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 10px 14px;
+    }
+
+    .msg-row.user .msg-bubble {
+      background: rgba(0,196,180,.12);
+      border-color: rgba(0,196,180,.25);
+    }
+
+    .msg-bubble p {
+      font-size: 13px;
+      color: var(--text-primary);
+      line-height: 1.6;
+    }
+
+    .msg-bubble code {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 1px 5px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--teal);
+    }
+
+    .msg-bubble pre {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 10px 12px;
+      margin-top: 8px;
+      overflow-x: auto;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-primary);
+      line-height: 1.6;
+    }
+
+    .msg-time {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      text-align: right;
+    }
+
+    .msg-row.user .msg-time { text-align: left; }
+
+    /* Typing indicator */
+    .typing-indicator {
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+
+    .typing-dots {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 12px 16px;
+      display: flex;
+      gap: 5px;
+      align-items: center;
+    }
+
+    .typing-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--teal);
+      animation: bounce 1.2s infinite ease-in-out;
+    }
+
+    .typing-dot:nth-child(2) { animation-delay: .2s; }
+    .typing-dot:nth-child(3) { animation-delay: .4s; }
+
+    @keyframes bounce {
+      0%, 80%, 100% { transform: translateY(0); opacity: .5; }
+      40%           { transform: translateY(-5px); opacity: 1; }
+    }
+
+    /* ── Chat Input ───────────────────────────────────────────────── */
+    .chat-input-area {
+      padding: 12px 20px 16px;
+      border-top: 1px solid var(--border);
+      background: var(--bg-base);
+    }
+
+    .chat-input-wrap {
+      display: flex;
+      align-items: flex-end;
+      gap: 10px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 10px 14px;
+      transition: border-color .2s;
+    }
+
+    .chat-input-wrap:focus-within {
+      border-color: var(--teal-dim);
+      box-shadow: 0 0 0 3px var(--teal-glow);
+    }
+
+    .chat-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text-primary);
+      font-family: var(--font);
+      font-size: 13px;
+      resize: none;
+      line-height: 1.5;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+
+    .chat-input::placeholder { color: var(--text-muted); }
+
+    .chat-input::-webkit-scrollbar { width: 3px; }
+    .chat-input::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .input-actions {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+
+    .input-icon-btn {
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--radius-sm);
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      color: var(--text-muted);
+      font-size: 15px;
+      transition: color .15s, background .15s;
+    }
+
+    .input-icon-btn:hover { background: var(--bg-hover); color: var(--text-secondary); }
+
+    .send-btn {
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--radius-md);
+      border: none;
+      background: var(--teal);
+      cursor: pointer;
+      color: #0e1117;
+      font-size: 15px;
+      font-weight: 700;
+      transition: background .15s, transform .1s;
+      flex-shrink: 0;
+    }
+
+    .send-btn:hover  { background: #00d9c8; }
+    .send-btn:active { transform: scale(.95); }
+
+    .input-hint {
+      font-size: 10px;
+      color: var(--text-muted);
+      padding: 5px 4px 0;
+    }
+
+    /* ── Divider ──────────────────────────────────────────────────── */
+    .metrics-divider {
+      height: 1px;
+      background: var(--border);
+      margin: 4px 12px 12px;
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ══ SIDEBAR ══════════════════════════════════════════════════ -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo-icon">⚡</div>
+      <span class="logo-text">Linux AI Agent</span>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Instances</div>
+    </div>
+
+    <div class="instance-list">
+
+      <div class="instance-item active">
+        <span class="status-dot online"></span>
+        <div class="instance-info">
+          <div class="instance-name">web-server-01</div>
+          <div class="instance-ip">192.168.1.10</div>
+        </div>
+        <span class="instance-tag prod">PROD</span>
+      </div>
+
+      <div class="instance-item">
+        <span class="status-dot online"></span>
+        <div class="instance-info">
+          <div class="instance-name">db-primary</div>
+          <div class="instance-ip">192.168.1.20</div>
+        </div>
+        <span class="instance-tag prod">PROD</span>
+      </div>
+
+      <div class="instance-item">
+        <span class="status-dot warning"></span>
+        <div class="instance-info">
+          <div class="instance-name">cache-redis</div>
+          <div class="instance-ip">192.168.1.30</div>
+        </div>
+        <span class="instance-tag prod">PROD</span>
+      </div>
+
+      <div class="instance-item">
+        <span class="status-dot online"></span>
+        <div class="instance-info">
+          <div class="instance-name">staging-api</div>
+          <div class="instance-ip">10.0.0.5</div>
+        </div>
+        <span class="instance-tag dev">DEV</span>
+      </div>
+
+      <div class="instance-item">
+        <span class="status-dot offline"></span>
+        <div class="instance-info">
+          <div class="instance-name">worker-node-3</div>
+          <div class="instance-ip">10.0.0.13</div>
+        </div>
+        <span class="instance-tag dev">DEV</span>
+      </div>
+
+      <div class="instance-item">
+        <span class="status-dot online"></span>
+        <div class="instance-info">
+          <div class="instance-name">monitor-box</div>
+          <div class="instance-ip">10.0.0.99</div>
+        </div>
+        <span class="instance-tag dev">DEV</span>
+      </div>
+
+    </div><!-- /instance-list -->
+
+    <div class="sidebar-footer">
+      <div class="avatar">JD</div>
+      <div class="user-info">
+        <div class="user-name">Jane Doe</div>
+        <div class="user-role">Administrator</div>
+      </div>
+      <div class="icon-btn" title="Settings">⚙</div>
+    </div>
+  </aside>
+
+  <!-- ══ TOPBAR ════════════════════════════════════════════════════ -->
+  <header class="topbar">
+    <span class="topbar-title">web-server-01</span>
+
+    <div class="ip-badge">
+      <span class="ip-badge-dot"></span>
+      192.168.1.10
+    </div>
+
+    <span class="topbar-spacer"></span>
+
+    <div class="toggle-group">
+      <button class="toggle-btn active">Auto</button>
+      <button class="toggle-btn">Manual</button>
+    </div>
+
+    <div class="topbar-actions">
+      <div class="icon-btn" title="Terminal">⌨</div>
+      <div class="icon-btn" title="Refresh">↻</div>
+      <div class="icon-btn" title="More options">⋯</div>
+    </div>
+  </header>
+
+  <!-- ══ MAIN ══════════════════════════════════════════════════════ -->
+  <div class="main">
+
+    <!-- ── Metrics Column ──────────────────────────────────────── -->
+    <aside class="metrics-col">
+
+      <div class="metrics-section">
+        <div class="metrics-section-title">System</div>
+
+        <!-- CPU -->
+        <div class="metric-card">
+          <div class="metric-card-header">
+            <div class="metric-label">
+              <span class="metric-icon">🖥</span> CPU
+            </div>
+          </div>
+          <div class="metric-value">42<span class="unit">%</span></div>
+          <div class="progress-bar">
+            <div class="progress-fill medium" style="width:42%"></div>
+          </div>
+          <div class="metric-sub">4 cores · 3.6 GHz</div>
+        </div>
+
+        <!-- Memory -->
+        <div class="metric-card">
+          <div class="metric-card-header">
+            <div class="metric-label">
+              <span class="metric-icon">💾</span> Memory
+            </div>
+          </div>
+          <div class="metric-value">6.1<span class="unit">GB</span></div>
+          <div class="progress-bar">
+            <div class="progress-fill medium" style="width:76%"></div>
+          </div>
+          <div class="metric-sub">76% of 8 GB</div>
+        </div>
+
+        <!-- Disk -->
+        <div class="metric-card">
+          <div class="metric-card-header">
+            <div class="metric-label">
+              <span class="metric-icon">💿</span> Disk
+            </div>
+          </div>
+          <div class="metric-value">128<span class="unit">GB</span></div>
+          <div class="progress-bar">
+            <div class="progress-fill low" style="width:51%"></div>
+          </div>
+          <div class="metric-sub">51% of 250 GB used</div>
+        </div>
+
+        <!-- Uptime -->
+        <div class="uptime-card">
+          <span class="uptime-icon">⏱</span>
+          <div class="uptime-info">
+            <div class="uptime-value">14d 7h 22m</div>
+            <div class="uptime-label">Uptime</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="metrics-divider"></div>
+
+      <div class="metrics-section">
+        <div class="metrics-section-title">Services</div>
+
+        <div class="service-item">
+          <span class="service-dot" style="background:var(--green);box-shadow:0 0 4px var(--green)"></span>
+          <span class="service-name">nginx</span>
+          <span class="service-status">running</span>
+        </div>
+        <div class="service-item">
+          <span class="service-dot" style="background:var(--green);box-shadow:0 0 4px var(--green)"></span>
+          <span class="service-name">sshd</span>
+          <span class="service-status">running</span>
+        </div>
+        <div class="service-item">
+          <span class="service-dot" style="background:var(--green);box-shadow:0 0 4px var(--green)"></span>
+          <span class="service-name">docker</span>
+          <span class="service-status">running</span>
+        </div>
+        <div class="service-item">
+          <span class="service-dot" style="background:var(--yellow);box-shadow:0 0 4px var(--yellow)"></span>
+          <span class="service-name">postgresql</span>
+          <span class="service-status">degraded</span>
+        </div>
+        <div class="service-item">
+          <span class="service-dot" style="background:var(--red);box-shadow:0 0 4px var(--red)"></span>
+          <span class="service-name">redis</span>
+          <span class="service-status">stopped</span>
+        </div>
+        <div class="service-item">
+          <span class="service-dot" style="background:var(--green);box-shadow:0 0 4px var(--green)"></span>
+          <span class="service-name">cron</span>
+          <span class="service-status">running</span>
+        </div>
+      </div>
+
+    </aside><!-- /metrics-col -->
+
+    <!-- ── Chat Column ─────────────────────────────────────────── -->
+    <section class="chat-col">
+
+      <div class="chat-messages">
+
+        <!-- Welcome banner -->
+        <div class="welcome-banner">
+          <div class="welcome-banner-title">👋 Hello, Jane!</div>
+          <div class="welcome-banner-sub">
+            I'm your Linux AI Agent connected to <strong>web-server-01</strong>.
+            Ask me anything about this instance — diagnostics, logs, commands, or performance.
+          </div>
+          <div class="welcome-chips">
+            <span class="chip">Show top processes</span>
+            <span class="chip">Check disk usage</span>
+            <span class="chip">Tail nginx logs</span>
+            <span class="chip">List open ports</span>
+            <span class="chip">System summary</span>
+          </div>
+        </div>
+
+        <!-- Agent message -->
+        <div class="msg-row">
+          <div class="msg-avatar agent">⚡</div>
+          <div>
+            <div class="msg-bubble">
+              <p>I've completed my initial scan of <strong>web-server-01</strong>. Everything looks healthy except for two items worth noting:</p>
+              <p style="margin-top:8px">• <code>redis</code> service is currently stopped.<br>
+              • Memory usage is at <strong>76%</strong> — approaching the threshold.</p>
+              <p style="margin-top:8px">Would you like me to investigate or take action?</p>
+            </div>
+            <div class="msg-time">14:32</div>
+          </div>
+        </div>
+
+        <!-- User message -->
+        <div class="msg-row user">
+          <div class="msg-avatar user">JD</div>
+          <div>
+            <div class="msg-bubble">
+              <p>Yes, check why redis stopped and show me the last 20 lines of its journal.</p>
+            </div>
+            <div class="msg-time">14:33</div>
+          </div>
+        </div>
+
+        <!-- Agent response with code block -->
+        <div class="msg-row">
+          <div class="msg-avatar agent">⚡</div>
+          <div>
+            <div class="msg-bubble">
+              <p>Running <code>journalctl -u redis -n 20</code>…</p>
+              <pre>Jun 16 14:10:03 web-server-01 redis-server[12481]: # Fatal error, can't open config file '/etc/redis/redis.conf'
+Jun 16 14:10:03 web-server-01 systemd[1]: redis.service: Control process exited with error code=ENOENT
+Jun 16 14:10:03 web-server-01 systemd[1]: Failed to start Advanced key-value store.
+Jun 16 14:10:03 web-server-01 systemd[1]: redis.service: Unit entered failed state.
+Jun 16 14:10:03 web-server-01 systemd[1]: redis.service: Failed with result 'exit-code'.</pre>
+              <p style="margin-top:8px">Root cause: <code>/etc/redis/redis.conf</code> is missing. This may have been deleted during a recent package upgrade. I can restore the default config — shall I proceed?</p>
+            </div>
+            <div class="msg-time">14:33</div>
+          </div>
+        </div>
+
+        <!-- Typing indicator -->
+        <div class="typing-indicator">
+          <div class="msg-avatar agent">⚡</div>
+          <div class="typing-dots">
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+          </div>
+        </div>
+
+      </div><!-- /chat-messages -->
+
+      <!-- Input area -->
+      <div class="chat-input-area">
+        <div class="chat-input-wrap">
+          <textarea
+            class="chat-input"
+            rows="1"
+            placeholder="Ask anything about web-server-01…"
+          ></textarea>
+          <div class="input-actions">
+            <button class="input-icon-btn" title="Attach file">📎</button>
+            <button class="send-btn" title="Send">↑</button>
+          </div>
+        </div>
+        <div class="input-hint">Enter to send · Shift+Enter for new line</div>
+      </div>
+
+    </section><!-- /chat-col -->
+
+  </div><!-- /main -->
+
+</div><!-- /app -->
+</body>
+</html>
