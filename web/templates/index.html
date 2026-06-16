@@ -314,6 +314,7 @@ table.jobs-table{width:100%;border-collapse:collapse;font-size:.83rem}
               <option value="">&#8212; select &#8212;</option>
             </select>
             <span id="chatStatus" class="muted"></span>
+            <button class="btn-sm hidden" id="diagnoseBtnManual" onclick="triggerManualDiagnose()">&#9888; Diagnose</button>
             <div class="mode-pill" style="margin-left:auto">
               <button class="mode-btn" id="modeBtnAuto" onclick="setMode('auto')">Auto</button>
               <button class="mode-btn" id="modeBtnManual" onclick="setMode('manual')">Manual</button>
@@ -499,6 +500,7 @@ let scheduleInstanceId = null;
 let currentMode = localStorage.getItem('ai_mode') || 'manual';
 let currentTab = 'dashboard';
 let monitoringData = {};
+let _evtSource = null;
 
 // ── Bootstrap ───────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
@@ -551,6 +553,26 @@ function setMode(mode) {
     const el = document.getElementById('sched-enabled');
     if (el) el.checked = (mode === 'auto');
   }
+  if (mode === 'auto') {
+    if (!_evtSource) {
+      _evtSource = new EventSource('/api/events');
+      _evtSource.addEventListener('auto_diagnosis', e => {
+        try {
+          const data = JSON.parse(e.data);
+          switchTab('chat');
+          if (data.instance_id) {
+            selectedInstanceId = parseInt(data.instance_id);
+            document.getElementById('chatInstance').value = selectedInstanceId;
+            chatInstanceChanged();
+          }
+          addChatMsg('agent', renderAIDiagnosisCard(data));
+        } catch {}
+      });
+    }
+  } else {
+    if (_evtSource) { _evtSource.close(); _evtSource = null; }
+  }
+  checkManualDiagnoseBtn();
 }
 
 // ── Topbar ─────────────────────────────────────────────────────────────────
@@ -839,6 +861,7 @@ function chatInstanceChanged() {
   document.getElementById('chatStatus').textContent = inst ? inst.host + ' \u2014 ' + (inst.last_status || 'unknown') : '';
   updateTopbar(inst || null);
   if (inst) loadMetrics(inst.id); else clearMetrics();
+  checkManualDiagnoseBtn();
 }
 function clearChat() {
   chatJobId = null; chatPlan = null; chatStepIndex = 0; chatHistory = [];
@@ -875,12 +898,21 @@ async function sendChat() {
     const cr = await fetch('/api/classify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }).then(r => r.json());
     intent = cr.intent || 'troubleshoot';
   } catch (e) { thinkMsg.innerHTML = '<span class="error-text">Classification failed.</span>'; return; }
-  thinkMsg.innerHTML = `<span class="spinner"></span> Intent: <b>${intent}</b> \u2014 collecting system data\u2026`;
+  thinkMsg.innerHTML = `<span class="spinner"></span> Intent: <b>${intent}</b> &#8212; collecting system data&#8230;`;
   if (intent === 'troubleshoot') {
-    const res = await fetch('/api/diagnose', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instance_id: selectedInstanceId, issue: text }) }).then(r => r.json());
-    if (res.error) { thinkMsg.innerHTML = `<span class="error-text">${esc(res.error)}</span>`; return; }
+    const [aiRes, planRes] = await Promise.all([
+      fetch('/api/diagnose', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instance_id: selectedInstanceId, problem: text, context: '' }) }).then(r => r.json()).catch(() => null),
+      fetch('/api/diagnose/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instance_id: selectedInstanceId, issue: text }) }).then(r => r.json()),
+    ]);
+    if (aiRes && !aiRes.error) {
+      thinkMsg.innerHTML = renderAIDiagnosisCard(aiRes);
+    } else {
+      thinkMsg.remove();
+    }
+    const res = planRes;
+    if (res.error) { addChatMsg('agent', `<span class="error-text">${esc(res.error)}</span>`); return; }
     chatJobId = res.job_id; chatPlan = res.plan; chatPlan._type = 'troubleshoot'; chatPlan._waiting_approval = true;
-    thinkMsg.innerHTML = renderTroubleshootPlan(res.plan);
+    addChatMsg('agent', renderTroubleshootPlan(res.plan));
   } else {
     const res = await fetch('/api/build/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instance_id: selectedInstanceId, request: text }) }).then(r => r.json());
     if (res.error) { thinkMsg.innerHTML = `<span class="error-text">${esc(res.error)}</span>`; return; }
@@ -972,6 +1004,49 @@ async function executeBuildPlan() {
 function getStdout(outputs) {
   if (!outputs || !outputs.length) return '';
   return (outputs[outputs.length - 1].stdout || '') + (outputs[outputs.length - 1].stderr || '');
+}
+
+// ── AI Diagnosis ──────────────────────────────────────────────────────────────
+function renderAIDiagnosisCard(data) {
+  const fp = String(data.fingerprint || '');
+  const isCache = data.source === 'cache';
+  const badgeBg = isCache ? '#1f2d4a' : '#1a3a2a';
+  const badgeColor = isCache ? '#58a6ff' : '#3fb950';
+  const badgeText = isCache ? 'from cache' : 'new diagnosis';
+  const steps = (data.fix_steps || []).map(s => `<div>&#10003; ${esc(s)}</div>`).join('');
+  return `<div style="margin-top:4px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px">
+    <span id="diag-badge-${esc(fp)}" style="display:inline-block;background:${badgeBg};color:${badgeColor};font-size:.72rem;padding:2px 8px;border-radius:4px;margin-bottom:8px">${badgeText}</span>
+    <div style="margin-bottom:6px"><b>Diagnosis:</b> ${esc(data.diagnosis || '')}</div>
+    <div style="font-size:.82rem;color:var(--text-sec);margin-bottom:8px">${steps}</div>
+    <button class="btn-sm" onclick="confirmDiagnosis('${esc(fp)}')">Mark as resolved</button>
+  </div>`;
+}
+
+async function confirmDiagnosis(fingerprint) {
+  await fetch('/api/diagnose/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fingerprint }) });
+  const badge = document.getElementById('diag-badge-' + fingerprint);
+  if (badge) { badge.style.background = '#1a3a2a'; badge.style.color = '#3fb950'; badge.textContent = 'resolved'; }
+}
+
+async function triggerManualDiagnose() {
+  if (!selectedInstanceId) return;
+  const m = monitoringData[selectedInstanceId];
+  const failed = (m && m.services || []).filter(s => s.status === 'failed').map(s => s.name);
+  const problem = failed.length ? 'Failed services: ' + failed.join(', ') : 'Service health issue detected';
+  switchTab('chat');
+  const msgEl = addChatMsg('agent', '<span class="spinner"></span> Running AI diagnosis\u2026');
+  const aiRes = await fetch('/api/diagnose', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instance_id: selectedInstanceId, problem, context: '' }) }).then(r => r.json());
+  if (aiRes.error) { msgEl.innerHTML = `<span class="error-text">${esc(aiRes.error)}</span>`; return; }
+  msgEl.innerHTML = renderAIDiagnosisCard(aiRes);
+}
+
+function checkManualDiagnoseBtn() {
+  const btn = document.getElementById('diagnoseBtnManual');
+  if (!btn) return;
+  if (currentMode !== 'manual' || !selectedInstanceId) { btn.classList.add('hidden'); return; }
+  const m = monitoringData[selectedInstanceId];
+  const hasFailed = !!(m && (m.services || []).some(s => s.status === 'failed'));
+  btn.classList.toggle('hidden', !hasFailed);
 }
 
 // ── Job History ───────────────────────────────────────────────────────────────
@@ -1239,6 +1314,7 @@ function updateMetricsFromMonitoring(m) {
   }
   if (m.uptime) document.getElementById('metricUptimeVal').textContent = m.uptime;
   if (m.services) renderServicesFromMonitoring(m.services);
+  checkManualDiagnoseBtn();
 }
 
 function renderServicesFromMonitoring(services) {
@@ -1263,6 +1339,7 @@ function renderServicesFromMonitoring(services) {
   }).join('');
   if (!html) html = '<div class="muted" style="font-size:.75rem">No data</div>';
   el.innerHTML = html;
+  checkManualDiagnoseBtn();
 }
 </script>
 </body>
