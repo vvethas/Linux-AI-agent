@@ -34,12 +34,12 @@ code,pre{font-family:'JetBrains Mono',ui-monospace,monospace}
 /* ── App shell ── */
 .app{display:flex;height:100vh;overflow:hidden}
 /* ── Sidebar ── */
-.sidebar{width:220px;flex-shrink:0;background:var(--sidebar-bg);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.sidebar{width:180px;flex-shrink:0;background:var(--sidebar-bg);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
 .sidebar-logo{display:flex;align-items:center;gap:9px;padding:0 16px;height:48px;border-bottom:1px solid var(--border);flex-shrink:0}
-.logo-dot{width:10px;height:10px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);flex-shrink:0}
-.logo-text{font-weight:700;font-size:.9rem;color:var(--text);letter-spacing:-.01em}
+.logo-dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0}
+.logo-text{font-weight:500;font-size:.75rem;color:#cdd9e5;letter-spacing:-.01em}
 .instances-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px 8px;flex-shrink:0}
-.instances-label{font-size:.68rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.instances-label{font-size:.56rem;font-weight:600;color:#444c56;text-transform:uppercase;letter-spacing:.07em}
 .btn-add{background:var(--surface);border:1px solid var(--border);color:var(--accent);width:22px;height:22px;border-radius:5px;font-size:.9rem;line-height:1;display:flex;align-items:center;justify-content:center}
 .btn-add:hover{background:var(--border)}
 .instance-list{flex:1;overflow-y:auto}
@@ -60,12 +60,19 @@ code,pre{font-family:'JetBrains Mono',ui-monospace,monospace}
 .instance-item:hover .inst-actions-wrap{opacity:1}
 .icon-btn{background:none;color:var(--text-sec);font-size:.75rem;padding:2px 4px;border-radius:4px;border:1px solid transparent}
 .icon-btn:hover{color:var(--text);border-color:var(--border);background:var(--card-bg)}
-/* ── Sidebar bottom nav ── */
-.sidebar-nav{border-top:1px solid var(--border);padding:8px 0;display:flex;flex-direction:row;justify-content:space-around;flex-shrink:0}
-.nav-btn{background:none;color:var(--text-sec);font-size:1rem;padding:7px 6px;border-radius:8px;border:1px solid transparent;display:flex;flex-direction:column;align-items:center;gap:2px;transition:.15s}
-.nav-btn span.nav-label{font-size:.58rem;font-weight:500;letter-spacing:.03em}
-.nav-btn:hover{color:var(--text);background:var(--surface)}
-.nav-btn.active{color:var(--accent);background:rgba(0,188,212,.08);border-color:rgba(0,188,212,.15)}
+/* ── Hover-reveal bottom nav ── */
+.hover-nav-wrap{flex-shrink:0}
+.hover-strip{height:4px;background:#00bcd4;opacity:.4;transition:opacity .25s ease;cursor:default}
+.hover-nav{height:0;overflow:hidden;background:var(--sidebar-bg);display:flex;align-items:center;justify-content:center;gap:4px;border-top:1px solid var(--border);transition:height .25s ease}
+.tab-nav-btn{background:none;border:1px solid transparent;color:var(--text-sec);padding:5px 10px;border-radius:7px;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;transition:.15s;min-width:58px}
+.tab-nav-btn:hover{color:var(--text);background:var(--surface)}
+.tab-nav-btn.active{background:#1a2332}
+.tab-nav-btn.active svg{color:#00bcd4}
+.tab-nav-btn.active .nav-label{color:#cdd9e5}
+.tab-nav-btn .nav-label{font-size:.58rem;font-weight:500;letter-spacing:.03em}
+/* ── Toast ── */
+.tab-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a2332;border:.5px solid #1e2d3d;color:#cdd9e5;font-size:11px;border-radius:6px;padding:6px 14px;z-index:1000;pointer-events:none;animation:toastFade 1.5s ease forwards}
+@keyframes toastFade{0%,70%{opacity:1}100%{opacity:0}}
 /* ── Main area ── */
 .main-area{flex:1;display:flex;flex-direction:column;overflow:hidden}
 /* ── Topbar ── */
@@ -74,8 +81,8 @@ code,pre{font-family:'JetBrains Mono',ui-monospace,monospace}
 .ip-badge{background:var(--surface);border:1px solid var(--border);color:var(--text-sec);font-size:.72rem;font-family:'JetBrains Mono',monospace;padding:2px 8px;border-radius:4px}
 .topbar-spacer{flex:1}
 .mode-pill{background:var(--surface);border:1px solid var(--border);border-radius:20px;display:flex;padding:2px;gap:2px}
-.mode-btn{background:none;border:none;color:var(--text-sec);padding:3px 12px;border-radius:14px;font-size:.75rem;font-weight:500;transition:.15s}
-.mode-btn.active{background:var(--accent);color:#0b0f14;font-weight:600}
+.mode-btn{background:none;border:none;color:#444c56;padding:3px 12px;border-radius:14px;font-size:.75rem;font-weight:500;transition:.15s}
+.mode-btn.active{background:#006b7a;color:#00bcd4;font-weight:600}
 .topbar-settings{background:none;border:1px solid var(--border);color:var(--text-sec);width:30px;height:30px;border-radius:6px;font-size:.85rem;display:flex;align-items:center;justify-content:center}
 .topbar-settings:hover{color:var(--text);background:var(--surface)}
 /* ── Workspace ── */
@@ -98,11 +105,10 @@ code,pre{font-family:'JetBrains Mono',ui-monospace,monospace}
 .service-row{display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:.75rem;border-bottom:1px solid rgba(30,45,61,.5)}
 .service-row:last-child{border-bottom:none}
 .service-name{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:110px}
-.svc-badge{font-size:.65rem;font-weight:600;padding:1px 6px;border-radius:999px;border:1px solid;flex-shrink:0}
-.svc-badge.running{color:var(--green);border-color:var(--green)}
-.svc-badge.failed{color:var(--red);border-color:var(--red)}
-.svc-badge.inactive{color:var(--amber);border-color:var(--amber)}
-.svc-badge.unknown{color:var(--muted);border-color:var(--muted)}
+.svc-badge{font-size:.65rem;font-weight:600;padding:2px 7px;border-radius:999px;flex-shrink:0}
+.svc-badge.running,.svc-badge.active{background:#1a3a2a;color:var(--green)}
+.svc-badge.failed{background:#3d1a1a;color:var(--red)}
+.svc-badge.inactive,.svc-badge.degraded,.svc-badge.unknown{background:#2d2208;color:var(--amber)}
 /* ── Content area ── */
 .content-area{flex:1;overflow:hidden;display:flex;flex-direction:column}
 /* ── Chat tab ── */
@@ -234,28 +240,6 @@ table.jobs-table{width:100%;border-collapse:collapse;font-size:.83rem}
       <button class="btn-add" onclick="showAddInstance()" title="Add instance">+</button>
     </div>
     <div class="instance-list" id="instanceList"></div>
-    <nav class="sidebar-nav">
-      <button class="tab nav-btn active" onclick="switchTab('dashboard')" title="Dashboard">
-        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="6" height="6" rx="1.5"/><rect x="9" y="1" width="6" height="6" rx="1.5"/><rect x="1" y="9" width="6" height="6" rx="1.5"/><rect x="9" y="9" width="6" height="6" rx="1.5"/></svg>
-        <span class="nav-label">Board</span>
-      </button>
-      <button class="tab nav-btn" onclick="switchTab('chat')" title="Chat">
-        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2h12a1 1 0 011 1v7a1 1 0 01-1 1H5l-3 3V3a1 1 0 011-1z"/></svg>
-        <span class="nav-label">Chat</span>
-      </button>
-      <button class="tab nav-btn" onclick="switchTab('jobs')" title="Jobs">
-        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M2 3.5h12v1.5H2zm0 4h12v1.5H2zm0 4h8v1.5H2z"/></svg>
-        <span class="nav-label">Jobs</span>
-      </button>
-      <button class="tab nav-btn" onclick="switchTab('studies')" title="Studies">
-        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M3 1.5h6.5L13 5v9.5a.5.5 0 01-.5.5h-9a.5.5 0 01-.5-.5v-13zm6.5 0V5H13" stroke="currentColor" stroke-width=".5" fill="none"/><path d="M5 7.5h6M5 9.5h6M5 11.5h4"/></svg>
-        <span class="nav-label">Studies</span>
-      </button>
-      <button class="tab nav-btn" onclick="switchTab('alerts')" title="Alerts">
-        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a5 5 0 00-5 5v3.5L1.5 12h13L13 9.5V6a5 5 0 00-5-5zm-1 13.5a1 1 0 002 0H7z"/></svg>
-        <span class="nav-label">Alerts</span>
-      </button>
-    </nav>
   </aside>
 
   <!-- Main area -->
@@ -265,11 +249,7 @@ table.jobs-table{width:100%;border-collapse:collapse;font-size:.83rem}
       <span class="topbar-title" id="topbar-name">Linux AI Agent</span>
       <span class="ip-badge hidden" id="topbar-ip"></span>
       <div class="topbar-spacer"></div>
-      <div class="mode-pill">
-        <button class="mode-btn active" id="modeBtnAuto" onclick="setMode('auto')">Auto</button>
-        <button class="mode-btn" id="modeBtnManual" onclick="setMode('manual')">Manual</button>
-      </div>
-      <button class="topbar-settings" onclick="switchTab('alerts')" title="Settings">&#9881;</button>
+      <button class="topbar-settings" onclick="switchTab('settings')" title="Settings">&#9881;</button>
     </div>
 
     <!-- Workspace -->
@@ -334,6 +314,10 @@ table.jobs-table{width:100%;border-collapse:collapse;font-size:.83rem}
               <option value="">&#8212; select &#8212;</option>
             </select>
             <span id="chatStatus" class="muted"></span>
+            <div class="mode-pill" style="margin-left:auto">
+              <button class="mode-btn" id="modeBtnAuto" onclick="setMode('auto')">Auto</button>
+              <button class="mode-btn" id="modeBtnManual" onclick="setMode('manual')">Manual</button>
+            </div>
           </div>
           <div class="chat-messages" id="chatMessages">
             <div class="msg agent">&#128075; Select an instance and describe what you need &#8212; I&#39;ll classify your request and guide you through the fix or deployment.</div>
@@ -434,6 +418,37 @@ table.jobs-table{width:100%;border-collapse:collapse;font-size:.83rem}
 
       </div><!-- /content-area -->
     </div><!-- /workspace -->
+
+    <!-- Hover-reveal bottom nav -->
+    <div class="hover-nav-wrap" id="hoverNavWrap">
+      <div class="hover-strip" id="hoverStrip"></div>
+      <nav class="hover-nav" id="hoverNav">
+        <button class="tab-nav-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="6" height="6" rx="1.5"/><rect x="9" y="1" width="6" height="6" rx="1.5"/><rect x="1" y="9" width="6" height="6" rx="1.5"/><rect x="9" y="9" width="6" height="6" rx="1.5"/></svg>
+          <span class="nav-label">Board</span>
+        </button>
+        <button class="tab-nav-btn" data-tab="chat" onclick="switchTab('chat')">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2h12a1 1 0 011 1v7a1 1 0 01-1 1H5l-3 3V3a1 1 0 011-1z"/></svg>
+          <span class="nav-label">Chat</span>
+        </button>
+        <button class="tab-nav-btn" data-tab="jobs" onclick="switchTab('jobs')">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M2 3.5h12v1.5H2zm0 4h12v1.5H2zm0 4h8v1.5H2z"/></svg>
+          <span class="nav-label">Jobs</span>
+        </button>
+        <button class="tab-nav-btn" data-tab="studies" onclick="switchTab('studies')">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M3 1.5h6.5L13 5v9.5a.5.5 0 01-.5.5h-9a.5.5 0 01-.5-.5v-13zm6.5 0V5H13" stroke="currentColor" stroke-width=".5" fill="none"/><path d="M5 7.5h6M5 9.5h6M5 11.5h4"/></svg>
+          <span class="nav-label">Studies</span>
+        </button>
+        <button class="tab-nav-btn" data-tab="alerts" onclick="switchTab('alerts')">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a5 5 0 00-5 5v3.5L1.5 12h13L13 9.5V6a5 5 0 00-5-5zm-1 13.5a1 1 0 002 0H7z"/></svg>
+          <span class="nav-label">Alerts</span>
+        </button>
+        <button class="tab-nav-btn" data-tab="settings" onclick="switchTab('settings')">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 5a3 3 0 100 6 3 3 0 000-6zm-5.5 3l.9-1.6A5.5 5.5 0 014.8 5l.2-1.8h6l.2 1.8a5.5 5.5 0 011.4.9L14.2 5l2.3 4-1.6.9a5.5 5.5 0 010 1.6l1.6.9-2.3 4-1.6-.9a5.5 5.5 0 01-1.4.9L11 18H5l-.2-1.6a5.5 5.5 0 01-1.4-.9L1.8 17 -0.5 13l1.6-.9a5.5 5.5 0 010-1.6L-.5 9.6 1.8 5.6l1.6.9A5.5 5.5 0 014.8 5L2.5 8z" clip-rule="evenodd"/><path d="M6.5 1.5h3l.4 1.7a5.5 5.5 0 011.5.9l1.7-.7 1.5 2.6-1.3 1.2a5.5 5.5 0 010 1.6l1.3 1.2-1.5 2.6-1.7-.7a5.5 5.5 0 01-1.5.9L9.5 14.5h-3l-.4-1.7a5.5 5.5 0 01-1.5-.9l-1.7.7-1.5-2.6 1.3-1.2a5.5 5.5 0 010-1.6L1.5 6l1.5-2.6 1.7.7a5.5 5.5 0 011.5-.9L6.5 1.5z" fill="none" stroke="currentColor" stroke-width="1"/><circle cx="8" cy="8" r="2"/></svg>
+          <span class="nav-label">Settings</span>
+        </button>
+      </nav>
+    </div>
   </div><!-- /main-area -->
 </div><!-- /app -->
 
@@ -481,47 +496,55 @@ let chatPhase = null;
 let chatStepIndex = 0;
 let chatHistory = [];
 let scheduleInstanceId = null;
-let currentMode = 'auto';
+let currentMode = localStorage.getItem('ai_mode') || 'manual';
+let currentTab = 'dashboard';
+let monitoringData = {};
 
 // ── Bootstrap ───────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
+  setMode(currentMode);
   loadInstances();
   loadDashboard();
   loadNotifyConfig();
+  pollMonitoring();
   setInterval(loadInstances, 30000);
+  setInterval(pollMonitoring, 30000);
   setInterval(() => {
     if (!document.getElementById('tab-dashboard').classList.contains('hidden')) loadDashboard();
   }, 60000);
+  initHoverNav();
+  initKeyboardShortcuts();
 });
 
 // ── Tab switching ────────────────────────────────────────────────────────────
 function switchTab(name) {
-  const tabNames = ['dashboard','chat','jobs','studies','alerts'];
-  tabNames.forEach(t => {
+  currentTab = name;
+  const showTabId = (name === 'settings') ? 'alerts' : name;
+  const tabIds = ['dashboard','chat','jobs','studies','alerts'];
+  tabIds.forEach(t => {
     const el = document.getElementById('tab-' + t);
     if (t === 'chat') { el.style.display = 'none'; }
     else { el.classList.add('hidden'); }
   });
   const metricsCol = document.getElementById('metricsCol');
-  if (name === 'chat') {
-    const el = document.getElementById('tab-chat');
-    el.style.display = 'flex';
+  if (showTabId === 'chat') {
+    document.getElementById('tab-chat').style.display = 'flex';
     metricsCol.style.display = 'flex';
   } else {
-    document.getElementById('tab-' + name).classList.remove('hidden');
+    document.getElementById('tab-' + showTabId).classList.remove('hidden');
     metricsCol.style.display = 'none';
   }
-  document.querySelectorAll('.nav-btn.tab').forEach((el, i) => {
-    el.classList.remove('active');
-    if (tabNames[i] === name) el.classList.add('active');
+  document.querySelectorAll('.tab-nav-btn').forEach(el => {
+    el.classList.toggle('active', el.dataset.tab === name);
   });
-  if (name === 'jobs') loadJobs();
-  if (name === 'studies') loadStudies();
+  if (showTabId === 'jobs') loadJobs();
+  if (showTabId === 'studies') loadStudies();
 }
 
 // ── Mode toggle ────────────────────────────────────────────────────────────
 function setMode(mode) {
   currentMode = mode;
+  localStorage.setItem('ai_mode', mode);
   document.getElementById('modeBtnAuto').classList.toggle('active', mode === 'auto');
   document.getElementById('modeBtnManual').classList.toggle('active', mode === 'manual');
   if (selectedInstanceId && scheduleInstanceId === selectedInstanceId) {
@@ -558,12 +581,15 @@ function renderSidebar() {
     el.innerHTML = '<div class="muted" style="padding:14px;font-size:.78rem">No instances yet.</div>';
     return;
   }
-  el.innerHTML = instances.map(i => `
-    <div class="instance-item${i.id === selectedInstanceId ? ' active' : ''}" onclick="selectInstance(${i.id})">
-      <span class="inst-dot ${i.last_status || 'unknown'}"></span>
+  el.innerHTML = instances.map(i => {
+    const m = monitoringData[i.id];
+    const cpuText = (m && m.cpu_pct != null) ? 'CPU ' + Math.round(m.cpu_pct) + '%' : esc(i.host);
+    return `
+    <div class="instance-item${i.id === selectedInstanceId ? ' active' : ''}" data-id="${i.id}" onclick="selectInstance(${i.id})">
+      <span class="inst-dot ${getInstanceDotStatus(i)}"></span>
       <div class="inst-info">
         <div class="inst-name">${esc(i.label)}</div>
-        <div class="inst-cpu" id="cpu-${i.id}">${esc(i.host)}</div>
+        <div class="inst-cpu" id="cpu-${i.id}">${cpuText}</div>
       </div>
       <div class="inst-actions-wrap">
         <button class="icon-btn" title="Study" onclick="event.stopPropagation();studyInstance(${i.id})">&#8853;</button>
@@ -571,7 +597,7 @@ function renderSidebar() {
         <button class="icon-btn" title="Remove" onclick="event.stopPropagation();removeInstance(${i.id})">&#10005;</button>
       </div>
     </div>
-  `).join('');
+  `;}).join('');
 }
 
 function populateInstanceSelects() {
@@ -714,17 +740,24 @@ function renderServices(d) {
   const failedRaw = String(d.services_failed || '');
   const running = runningRaw.split('\n').map(l => l.trim())
     .filter(l => l && !/^(UNIT|●|0 loaded)/i.test(l) && l.includes('.'))
-    .slice(0, 8).map(l => ({ name: l.split(/\s+/)[0].replace(/\.service$/, ''), status: 'running' }));
+    .slice(0, 8).map(l => ({ name: l.split(/\s+/)[0].replace(/\.service$/, ''), status: 'active' }));
   const failed = failedRaw.split('\n').map(l => l.trim())
     .filter(l => l && l.includes('.service') && !/^(UNIT|0 loaded)/i.test(l))
     .slice(0, 4).map(l => ({ name: l.split(/\s+/)[0].replace(/\.service$/, ''), status: 'failed' }));
   const all = [...failed, ...running].slice(0, 10);
   if (!all.length) { el.innerHTML = '<div class="muted" style="font-size:.75rem">No data</div>'; return; }
-  el.innerHTML = all.map(s => `
+  let html = '';
+  if (failed.length) {
+    html += '<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:6px">' +
+      failed.map(s => `<span class="svc-badge failed">${esc(s.name)}</span>`).join('') +
+      '</div>';
+  }
+  html += running.map(s => `
     <div class="service-row">
       <span class="service-name" title="${esc(s.name)}">${esc(s.name)}</span>
-      <span class="svc-badge ${s.status}">${s.status === 'running' ? 'up' : s.status}</span>
+      <span class="svc-badge active">active</span>
     </div>`).join('');
+  el.innerHTML = html;
 }
 
 // ── Dashboard ────────────────────────────────────────────────────────────────
@@ -1090,6 +1123,144 @@ async function triggerNow() {
 // ── Utility ───────────────────────────────────────────────────────────────────
 function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 function fmtDate(iso) { if (!iso) return '\u2013'; try { return new Date(iso).toLocaleString(); } catch { return iso; } }
+
+// ── Hover nav ─────────────────────────────────────────────────────────────────
+function initHoverNav() {
+  const wrap = document.getElementById('hoverNavWrap');
+  const strip = document.getElementById('hoverStrip');
+  const nav = document.getElementById('hoverNav');
+  let leaveTimer = null;
+  wrap.addEventListener('mouseenter', () => {
+    clearTimeout(leaveTimer);
+    strip.style.opacity = '1';
+    nav.style.height = '54px';
+  });
+  wrap.addEventListener('mouseleave', () => {
+    leaveTimer = setTimeout(() => {
+      strip.style.opacity = '0.4';
+      nav.style.height = '0';
+    }, 400);
+  });
+}
+
+// ── Keyboard shortcuts ────────────────────────────────────────────────────────
+function initKeyboardShortcuts() {
+  const tabOrder = ['dashboard','chat','jobs','studies','alerts','settings'];
+  const tabLabels = { dashboard:'Board', chat:'Chat', jobs:'Jobs', studies:'Studies', alerts:'Alerts', settings:'Settings' };
+  document.addEventListener('keydown', e => {
+    if (e.ctrlKey && e.key === 'Tab') {
+      e.preventDefault();
+      const cur = tabOrder.indexOf(currentTab);
+      const next = e.shiftKey
+        ? (cur - 1 + tabOrder.length) % tabOrder.length
+        : (cur + 1) % tabOrder.length;
+      switchTab(tabOrder[next]);
+      showTabToast('Switched to ' + tabLabels[tabOrder[next]]);
+    }
+  });
+}
+
+function showTabToast(msg) {
+  const existing = document.querySelectorAll('.tab-toast');
+  existing.forEach(t => t.remove());
+  const toast = document.createElement('div');
+  toast.className = 'tab-toast';
+  toast.textContent = msg;
+  document.body.appendChild(toast);
+  setTimeout(() => { if (toast.parentNode) toast.remove(); }, 1500);
+}
+
+// ── Monitoring ────────────────────────────────────────────────────────────────
+async function pollMonitoring() {
+  try {
+    const res = await fetch('/api/monitoring');
+    if (!res.ok) return;
+    const data = await res.json();
+    const items = data.instances || [];
+    monitoringData = {};
+    items.forEach(m => { monitoringData[m.id] = m; });
+    updateSidebarDots();
+    if (selectedInstanceId && monitoringData[selectedInstanceId]) {
+      updateMetricsFromMonitoring(monitoringData[selectedInstanceId]);
+    }
+  } catch { /* endpoint may not exist yet */ }
+}
+
+function getInstanceDotStatus(inst) {
+  const m = monitoringData[inst.id];
+  if (!m) return inst.last_status || 'unknown';
+  if (m.reachable === false) return 'offline';
+  const services = m.services || [];
+  const hasFailed = services.some(s => s.status === 'failed');
+  const hasDegraded = services.some(s => s.status === 'degraded' || s.status === 'inactive');
+  const cpu = m.cpu_pct || 0;
+  if (hasFailed) return 'offline';
+  if (hasDegraded || cpu >= 70) return 'unknown';
+  return 'online';
+}
+
+function updateSidebarDots() {
+  document.querySelectorAll('#instanceList .instance-item').forEach(item => {
+    const id = parseInt(item.dataset.id);
+    const inst = instances.find(i => i.id === id);
+    if (!inst) return;
+    const dotEl = item.querySelector('.inst-dot');
+    const cpuEl = item.querySelector('.inst-cpu');
+    if (dotEl) dotEl.className = 'inst-dot ' + getInstanceDotStatus(inst);
+    const m = monitoringData[id];
+    if (cpuEl && m && m.cpu_pct != null) cpuEl.textContent = 'CPU ' + Math.round(m.cpu_pct) + '%';
+  });
+}
+
+function updateMetricsFromMonitoring(m) {
+  if (!m) return;
+  if (m.cpu_pct != null) {
+    const cpuPct = Math.round(m.cpu_pct);
+    document.getElementById('metricCpuVal').textContent = cpuPct + '%';
+    setProgressColor('metricCpuBar', cpuPct);
+    const cpuEl = document.getElementById('cpu-' + selectedInstanceId);
+    if (cpuEl) cpuEl.textContent = 'CPU ' + cpuPct + '%';
+  }
+  if (m.mem_pct != null) {
+    const memPct = Math.round(m.mem_pct);
+    setProgressColor('metricMemBar', memPct);
+    if (m.mem_used) document.getElementById('metricMemVal').textContent = m.mem_used;
+    else document.getElementById('metricMemVal').textContent = memPct + '%';
+    if (m.mem_total) document.getElementById('metricMemSub').textContent = 'of ' + m.mem_total;
+  }
+  if (m.disk_pct != null) {
+    const diskPct = Math.round(m.disk_pct);
+    document.getElementById('metricDiskVal').textContent = diskPct + '%';
+    setProgressColor('metricDiskBar', diskPct);
+    if (m.disk_used && m.disk_total) document.getElementById('metricDiskSub').textContent = m.disk_used + ' of ' + m.disk_total;
+  }
+  if (m.uptime) document.getElementById('metricUptimeVal').textContent = m.uptime;
+  if (m.services) renderServicesFromMonitoring(m.services);
+}
+
+function renderServicesFromMonitoring(services) {
+  const el = document.getElementById('servicesList');
+  if (!services || !services.length) { el.innerHTML = '<div class="muted" style="font-size:.75rem">No data</div>'; return; }
+  const failed = services.filter(s => s.status === 'failed');
+  const active = services.filter(s => s.status === 'active' || s.status === 'running');
+  const degraded = services.filter(s => s.status === 'degraded' || s.status === 'inactive');
+  let html = '';
+  if (failed.length) {
+    html += '<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:6px">' +
+      failed.map(s => `<span class="svc-badge failed">${esc(s.name)}</span>`).join('') +
+      '</div>';
+  }
+  const others = [...active, ...degraded].slice(0, 8);
+  html += others.map(s => {
+    const cls = (s.status === 'active' || s.status === 'running') ? 'active' : 'degraded';
+    return `<div class="service-row">
+      <span class="service-name" title="${esc(s.name)}">${esc(s.name)}</span>
+      <span class="svc-badge ${cls}">${s.status}</span>
+    </div>`;
+  }).join('');
+  if (!html) html = '<div class="muted" style="font-size:.75rem">No data</div>';
+  el.innerHTML = html;
+}
 </script>
 </body>
 </html>
