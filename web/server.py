@@ -186,9 +186,11 @@ def add_instance():
 
     ok, reason = ssh.test_connection(test_instance)
     if not ok:
+        # Log the full reason server-side; never send raw exception text to callers.
+        log.warning("SSH test failed for %s: %s", payload.get("host"), reason)
         return jsonify({
-            "ssh_test": {"ok": False, "reason": reason},
-            "error": f"SSH connection test failed: {reason}",
+            "ssh_test": {"ok": False},
+            "error": "SSH connection test failed — check host, port, and credentials (see server logs for details)",
         }), 422
 
     # ── Persist only after a successful test ──────────────────────────────────
