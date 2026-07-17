@@ -602,6 +602,7 @@ function switchTab(name) {
   });
   if (showTabId === 'jobs') loadJobs();
   if (showTabId === 'studies') loadStudies();
+  if (showTabId === 'alerts') { loadNotifyConfig(); loadNotifySubscriptions(); }
 }
 
 // ── Mode toggle ────────────────────────────────────────────────────────────

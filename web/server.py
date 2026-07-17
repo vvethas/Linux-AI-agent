@@ -245,6 +245,10 @@ def test_instance(instance_id: int):
         return _err("instance not found", 404)
     ok, reason = ssh.test_connection(instance)
     db.update_instance_status(instance_id, "online" if ok else "auth_error")
+    if ok:
+        notifier.resolve_instance_reachable(instance_id)
+    else:
+        notifier.notify_instance_down(instance, reason)
     return jsonify({"ok": ok, "reason": reason})
 
 
