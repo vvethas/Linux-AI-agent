@@ -18,7 +18,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, session
+from werkzeug.security import check_password_hash, generate_password_hash
 
 try:
     from openai import OpenAI as _OpenAIClient
@@ -40,6 +41,7 @@ from agent.report import generate_study_html
 from agent.scheduler import HealthScheduler
 from agent.ssh import SSHManager
 from agent.study import StudyRunner
+from web.auth import init_auth, require_permission
 
 # Hard-fail on startup if the master encryption key is absent.
 validate_master_key()
@@ -86,6 +88,12 @@ study_runner = StudyRunner(db, ssh, claude)
 notifier = Notifier(db)
 replicator = Replicator(db, ssh, claude)
 scheduler = HealthScheduler(db, ssh, study_runner, notifier)
+
+# Initialise session-based auth (sets secret_key, registers before_request)
+init_auth(app, db)
+
+# Seed the default admin account if no users exist yet
+db.seed_default_admin()
 
 # In-memory job sessions: {job_id: {plan, history, instance_id, type, started}}
 sessions: Dict[int, Dict[str, Any]] = {}
@@ -142,9 +150,309 @@ def home():
     return render_template("index.html")
 
 
+@app.route("/invite/<token>")
+def invite_page(token: str):
+    user = db.get_user_by_invite_token(token)
+    if not user:
+        return render_template("index.html")
+    # Render the same SPA; JS detects ?invite=<token> and shows the set-password form
+    return render_template("index.html")
+
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
+@app.route("/api/auth/me", methods=["GET"])
+def auth_me():
+    from flask import g as _g
+    role = _g.get("user_role")
+    if role is None:
+        return jsonify({"authenticated": False}), 401
+    user = _g.get("current_user")
+    return jsonify({
+        "authenticated": True,
+        "user": {
+            "id": user["id"] if user else None,
+            "name": user["name"] if user else "admin",
+            "email": user["email"] if user else "",
+        },
+        "role": role,
+        "must_change_password": bool(_g.get("must_change_password")),
+    })
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    payload = request.get_json(force=True) or {}
+    email = str(payload.get("email", "")).strip().lower()
+    password = str(payload.get("password", ""))
+    if not email or not password:
+        return _err("email and password are required")
+    user = db.get_user_by_email(email)
+    if not user or user.get("status") != "active":
+        return _err("Invalid credentials", 401)
+    if not user.get("password_hash"):
+        return _err("Invalid credentials", 401)
+    if not check_password_hash(user["password_hash"], password):
+        return _err("Invalid credentials", 401)
+    session.clear()
+    session["user_id"] = user["id"]
+    role_name = ""
+    if user.get("role_id"):
+        role = db.get_role(user["role_id"])
+        role_name = role["name"] if role else ""
+    else:
+        groups = db.get_user_groups(user["id"])
+        for grp in groups:
+            r = db.get_role(grp["role_id"])
+            if r:
+                role_name = r["name"]
+                break
+    must_change = bool(user.get("must_change_password"))
+    return jsonify({"ok": True, "role": role_name, "name": user["name"],
+                    "must_change_password": must_change})
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def auth_logout():
+    session.clear()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/auth/set_password", methods=["POST"])
+def auth_set_password():
+    """Accept an invite: validate token, set password, activate account."""
+    payload = request.get_json(force=True) or {}
+    token = str(payload.get("token", ""))
+    password = str(payload.get("password", ""))
+    if not token or not password:
+        return _err("token and password are required")
+    if len(password) < 8:
+        return _err("password must be at least 8 characters")
+    user = db.get_user_by_invite_token(token)
+    if not user:
+        return _err("Invalid or expired invite token", 404)
+    db.set_user_password(user["id"], generate_password_hash(password))
+    session.clear()
+    session["user_id"] = user["id"]
+    return jsonify({"ok": True, "name": user["name"]})
+
+
+@app.route("/api/auth/change_password", methods=["POST"])
+def auth_change_password():
+    """Forced password change for accounts with must_change_password=1.
+
+    Requires an active session.  Sets the new password and clears the
+    must_change_password flag so normal access is restored.
+    """
+    from flask import g as _g
+    user = _g.get("current_user")
+    if not user:
+        return _err("Authentication required", 401)
+    payload = request.get_json(force=True) or {}
+    password = str(payload.get("password", ""))
+    if not password:
+        return _err("password is required")
+    if len(password) < 8:
+        return _err("password must be at least 8 characters")
+    db.set_user_password(user["id"], generate_password_hash(password))
+    return jsonify({"ok": True})
+
+
+# ── User management (Admin only) ──────────────────────────────────────────────
+
+@app.route("/api/roles", methods=["GET"])
+@require_permission("view")
+def list_roles():
+    return jsonify({"roles": db.list_roles()})
+
+
+@app.route("/api/users", methods=["GET"])
+@require_permission("manage_users")
+def list_users():
+    users = db.list_users()
+    # Strip password_hash from response
+    for u in users:
+        u.pop("password_hash", None)
+        u.pop("invite_token", None)
+    return jsonify({"users": users})
+
+
+@app.route("/api/users", methods=["POST"])
+@require_permission("manage_users")
+def create_user():
+    payload = request.get_json(force=True) or {}
+    name = str(payload.get("name", "")).strip()
+    email = str(payload.get("email", "")).strip().lower()
+    assign_type = str(payload.get("assign_type", ""))  # "role" | "group"
+    role_id = payload.get("role_id")
+    group_id = payload.get("group_id")
+
+    if not name or not email:
+        return _err("name and email are required")
+    if assign_type not in ("role", "group"):
+        return _err("assign_type must be 'role' or 'group'")
+    if assign_type == "role" and not role_id:
+        return _err("role_id required when assign_type is 'role'")
+    if assign_type == "group" and not group_id:
+        return _err("group_id required when assign_type is 'group'")
+
+    # Check email uniqueness
+    if db.get_user_by_email(email):
+        return _err("a user with that email already exists")
+
+    direct_role_id = int(role_id) if assign_type == "role" else None
+    try:
+        user_id, token = db.create_user(name, email, role_id=direct_role_id)
+    except Exception as exc:
+        log.exception("create_user error")
+        return _safe_err(exc)
+
+    if assign_type == "group":
+        db.add_group_member(int(group_id), user_id)
+
+    invite_url = f"/invite/{token}"
+    return jsonify({"user_id": user_id, "invite_url": invite_url}), 201
+
+
+@app.route("/api/users/<int:user_id>", methods=["PUT"])
+@require_permission("manage_users")
+def edit_user(user_id: int):
+    payload = request.get_json(force=True) or {}
+    user = db.get_user(user_id)
+    if not user:
+        return _err("user not found", 404)
+
+    assign_type = str(payload.get("assign_type", ""))
+    role_id = payload.get("role_id")
+    group_id = payload.get("group_id")
+    name = str(payload.get("name", user["name"])).strip()
+    email = str(payload.get("email", user["email"])).strip().lower()
+
+    if assign_type not in ("role", "group", ""):
+        return _err("assign_type must be 'role' or 'group'")
+
+    # Remove from all current groups first
+    for grp in db.get_user_groups(user_id):
+        db.remove_group_member(grp["id"], user_id)
+
+    direct_role = None
+    if assign_type == "role":
+        if not role_id:
+            return _err("role_id required when assign_type is 'role'")
+        direct_role = int(role_id)
+    elif assign_type == "group":
+        if not group_id:
+            return _err("group_id required when assign_type is 'group'")
+        db.add_group_member(int(group_id), user_id)
+
+    db.update_user(user_id, name=name, email=email, role_id=direct_role)
+    updated = db.get_user(user_id)
+    if updated:
+        updated.pop("password_hash", None)
+        updated.pop("invite_token", None)
+    return jsonify({"user": updated})
+
+
+@app.route("/api/users/<int:user_id>/disable", methods=["POST"])
+@require_permission("manage_users")
+def disable_user(user_id: int):
+    user = db.get_user(user_id)
+    if not user:
+        return _err("user not found", 404)
+    db.update_user(user_id, status="disabled")
+    return jsonify({"ok": True})
+
+
+@app.route("/api/users/<int:user_id>/resend_invite", methods=["POST"])
+@require_permission("manage_users")
+def resend_invite(user_id: int):
+    user = db.get_user(user_id)
+    if not user:
+        return _err("user not found", 404)
+    token = db.regenerate_invite_token(user_id)
+    invite_url = f"/invite/{token}"
+    return jsonify({"invite_url": invite_url})
+
+
+# ── Group management (Admin only) ─────────────────────────────────────────────
+
+@app.route("/api/groups", methods=["GET"])
+@require_permission("manage_users")
+def list_groups():
+    return jsonify({"groups": db.list_groups()})
+
+
+@app.route("/api/groups", methods=["POST"])
+@require_permission("manage_users")
+def create_group():
+    payload = request.get_json(force=True) or {}
+    name = str(payload.get("name", "")).strip()
+    role_id = payload.get("role_id")
+    if not name or not role_id:
+        return _err("name and role_id are required")
+    try:
+        group_id = db.create_group(name, int(role_id))
+    except Exception as exc:
+        log.exception("create_group error")
+        return _safe_err(exc)
+    return jsonify({"group": db.get_group(group_id)}), 201
+
+
+@app.route("/api/groups/<int:group_id>", methods=["PUT"])
+@require_permission("manage_users")
+def edit_group(group_id: int):
+    group = db.get_group(group_id)
+    if not group:
+        return _err("group not found", 404)
+    payload = request.get_json(force=True) or {}
+    fields: Dict[str, Any] = {}
+    if "name" in payload:
+        fields["name"] = str(payload["name"]).strip()
+    if "role_id" in payload:
+        fields["role_id"] = int(payload["role_id"])
+    db.update_group(group_id, **fields)
+    return jsonify({"group": db.get_group(group_id)})
+
+
+@app.route("/api/groups/<int:group_id>", methods=["DELETE"])
+@require_permission("manage_users")
+def delete_group(group_id: int):
+    db.delete_group(group_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/groups/<int:group_id>/members", methods=["GET"])
+@require_permission("manage_users")
+def group_members(group_id: int):
+    return jsonify({"members": db.get_group_members(group_id)})
+
+
+@app.route("/api/groups/<int:group_id>/members", methods=["POST"])
+@require_permission("manage_users")
+def add_group_member(group_id: int):
+    payload = request.get_json(force=True) or {}
+    user_id = payload.get("user_id")
+    if not user_id:
+        return _err("user_id is required")
+    if not db.get_group(group_id):
+        return _err("group not found", 404)
+    if not db.get_user(int(user_id)):
+        return _err("user not found", 404)
+    db.add_group_member(group_id, int(user_id))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/groups/<int:group_id>/members/<int:user_id>", methods=["DELETE"])
+@require_permission("manage_users")
+def remove_group_member(group_id: int, user_id: int):
+    db.remove_group_member(group_id, user_id)
+    return jsonify({"ok": True})
+
+
 # ── Instances ─────────────────────────────────────────────────────────────────
 
 @app.route("/api/instances", methods=["POST"])
+@require_permission("manage_instances")
 def add_instance():
     payload = request.get_json(force=True) or {}
     for field in ("label", "host", "username", "auth_type"):
@@ -226,12 +534,14 @@ def add_instance():
 
 
 @app.route("/api/instances", methods=["GET"])
+@require_permission("view")
 def list_instances():
     raw = db.list_instances()
     return jsonify({"instances": [_safe_instance_for_api(i) for i in raw]})
 
 
 @app.route("/api/instances/<int:instance_id>", methods=["DELETE"])
+@require_permission("manage_instances")
 def delete_instance(instance_id: int):
     db.delete_instance(instance_id)
     scheduler.remove_schedule(instance_id)
@@ -239,6 +549,7 @@ def delete_instance(instance_id: int):
 
 
 @app.route("/api/instances/<int:instance_id>/test", methods=["POST"])
+@require_permission("run_diagnostics")
 def test_instance(instance_id: int):
     instance = _get_instance(instance_id)
     if not instance:
@@ -253,6 +564,7 @@ def test_instance(instance_id: int):
 
 
 @app.route("/api/instances/<int:instance_id>/diagnostics", methods=["GET"])
+@require_permission("run_diagnostics")
 def instance_diagnostics(instance_id: int):
     instance = _get_instance(instance_id)
     if not instance:
@@ -264,6 +576,7 @@ def instance_diagnostics(instance_id: int):
 
 
 @app.route("/api/instances/<int:instance_id>/study", methods=["POST"])
+@require_permission("run_diagnostics")
 def run_study(instance_id: int):
     instance = _get_instance(instance_id)
     if not instance:
@@ -287,11 +600,13 @@ def run_study(instance_id: int):
 # ── Schedule ──────────────────────────────────────────────────────────────────
 
 @app.route("/api/instances/<int:instance_id>/schedule", methods=["GET"])
+@require_permission("view")
 def get_schedule(instance_id: int):
     return jsonify({"schedule": db.get_schedule(instance_id)})
 
 
 @app.route("/api/instances/<int:instance_id>/schedule", methods=["POST"])
+@require_permission("manage_instances")
 def set_schedule(instance_id: int):
     payload = request.get_json(force=True) or {}
     mode = str(payload.get("mode", "interval"))
@@ -304,6 +619,7 @@ def set_schedule(instance_id: int):
 
 
 @app.route("/api/instances/<int:instance_id>/schedule", methods=["DELETE"])
+@require_permission("manage_instances")
 def del_schedule(instance_id: int):
     db.delete_schedule(instance_id)
     scheduler.remove_schedule(instance_id)
@@ -311,6 +627,7 @@ def del_schedule(instance_id: int):
 
 
 @app.route("/api/instances/<int:instance_id>/trigger", methods=["POST"])
+@require_permission("run_diagnostics")
 def trigger_check(instance_id: int):
     instance = _get_instance(instance_id)
     if not instance:
@@ -320,6 +637,7 @@ def trigger_check(instance_id: int):
 
 
 @app.route("/api/instances/<int:instance_id>/check_log", methods=["GET"])
+@require_permission("view")
 def check_log(instance_id: int):
     return jsonify({"entries": db.get_check_log(instance_id)})
 
@@ -327,6 +645,7 @@ def check_log(instance_id: int):
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
 @app.route("/api/dashboard", methods=["GET"])
+@require_permission("view")
 def dashboard():
     instances = db.list_instances()
     studies = db.list_studies()
@@ -374,6 +693,7 @@ def dashboard():
 # ── Chat / classify ───────────────────────────────────────────────────────────
 
 @app.route("/api/classify", methods=["POST"])
+@require_permission("run_diagnostics")
 def classify():
     payload = request.get_json(force=True) or {}
     text = str(payload.get("text", ""))
@@ -389,6 +709,7 @@ def classify():
 # ── Troubleshoot ──────────────────────────────────────────────────────────────
 
 @app.route("/api/diagnose/plan", methods=["POST"])
+@require_permission("run_diagnostics")
 def diagnose_plan():
     payload = request.get_json(force=True) or {}
     instance_id = payload.get("instance_id")
@@ -424,6 +745,7 @@ def diagnose_plan():
 # ── AI diagnostic (OpenAI knowledge-base) ────────────────────────────────────
 
 @app.route("/api/diagnose", methods=["POST"])
+@require_permission("run_diagnostics")
 def ai_diagnose():
     payload = request.get_json(force=True) or {}
     instance_id = str(payload.get("instance_id", ""))
@@ -513,6 +835,7 @@ def ai_diagnose():
 
 
 @app.route("/api/diagnose/confirm", methods=["POST"])
+@require_permission("run_diagnostics")
 def ai_diagnose_confirm():
     payload = request.get_json(force=True) or {}
     fingerprint = str(payload.get("fingerprint", ""))
@@ -528,6 +851,7 @@ def ai_diagnose_confirm():
 
 
 @app.route("/api/knowledge", methods=["GET"])
+@require_permission("view")
 def knowledge_base_list():
     with _kb_conn() as conn:
         rows = conn.execute(
@@ -537,6 +861,7 @@ def knowledge_base_list():
 
 
 @app.route("/api/events", methods=["GET"])
+@require_permission("view")
 def sse_events():
     def generate():
         while True:
@@ -615,6 +940,7 @@ def execute_step():
 
 
 @app.route("/api/verify", methods=["POST"])
+@require_permission("run_diagnostics")
 def verify_fix():
     payload = request.get_json(force=True) or {}
     instance_id = payload.get("instance_id")
@@ -631,6 +957,7 @@ def verify_fix():
 # ── Build ─────────────────────────────────────────────────────────────────────
 
 @app.route("/api/build/plan", methods=["POST"])
+@require_permission("manage_instances")
 def build_plan():
     payload = request.get_json(force=True) or {}
     instance_id = payload.get("instance_id")
@@ -664,11 +991,13 @@ def build_plan():
 
 
 @app.route("/api/build/execute_step", methods=["POST"])
+@require_permission("manage_instances")
 def build_execute_step():
     return execute_step()
 
 
 @app.route("/api/build/post_install", methods=["POST"])
+@require_permission("manage_instances")
 def build_post_install():
     payload = request.get_json(force=True) or {}
     instance_id = payload.get("instance_id")
@@ -685,6 +1014,7 @@ def build_post_install():
 # ── Jobs ──────────────────────────────────────────────────────────────────────
 
 @app.route("/api/jobs", methods=["GET"])
+@require_permission("view")
 def list_jobs():
     instance_id = request.args.get("instance_id")
     job_type = request.args.get("type")
@@ -696,6 +1026,7 @@ def list_jobs():
 
 
 @app.route("/api/jobs/<int:job_id>", methods=["GET"])
+@require_permission("view")
 def job_detail(job_id: int):
     job = db.get_job(job_id)
     if not job:
@@ -704,6 +1035,7 @@ def job_detail(job_id: int):
 
 
 @app.route("/api/jobs/<int:job_id>", methods=["DELETE"])
+@require_permission("manage_instances")
 def delete_job(job_id: int):
     db.delete_job(job_id)
     sessions.pop(job_id, None)
@@ -713,6 +1045,7 @@ def delete_job(job_id: int):
 # ── Studies ───────────────────────────────────────────────────────────────────
 
 @app.route("/api/studies", methods=["GET"])
+@require_permission("view")
 def list_studies():
     instance_id = request.args.get("instance_id")
     data = db.list_studies(instance_id=int(instance_id) if instance_id else None)
@@ -720,6 +1053,7 @@ def list_studies():
 
 
 @app.route("/api/studies/<int:study_id>", methods=["GET"])
+@require_permission("view")
 def study_detail(study_id: int):
     study = db.get_study(study_id)
     if not study:
@@ -728,6 +1062,7 @@ def study_detail(study_id: int):
 
 
 @app.route("/api/studies/<int:study_id>/html", methods=["GET"])
+@require_permission("view")
 def study_html(study_id: int):
     study = db.get_study(study_id)
     if not study:
@@ -743,6 +1078,7 @@ def study_html(study_id: int):
 
 
 @app.route("/api/studies/<int:study_id>", methods=["DELETE"])
+@require_permission("manage_instances")
 def delete_study(study_id: int):
     db.delete_study(study_id)
     return jsonify({"ok": True})
@@ -751,6 +1087,7 @@ def delete_study(study_id: int):
 # ── Replication ───────────────────────────────────────────────────────────────
 
 @app.route("/api/replicate/plan", methods=["POST"])
+@require_permission("manage_instances")
 def replicate_plan():
     payload = request.get_json(force=True) or {}
     source_instance_id = payload.get("source_instance_id")
@@ -798,6 +1135,7 @@ def replicate_plan():
 
 
 @app.route("/api/replicate/<int:job_id>/step", methods=["POST"])
+@require_permission("manage_instances")
 def replicate_step(job_id: int):
     payload = request.get_json(force=True) or {}
     job = db.get_job(job_id)
@@ -839,6 +1177,7 @@ def replicate_step(job_id: int):
 
 
 @app.route("/api/replicate/<int:job_id>/verify", methods=["POST"])
+@require_permission("manage_instances")
 def replicate_verify(job_id: int):
     payload = request.get_json(force=True) or {}
     job = db.get_job(job_id)
@@ -852,6 +1191,7 @@ def replicate_verify(job_id: int):
 
 
 @app.route("/api/replicate/<int:job_id>/playbook", methods=["GET"])
+@require_permission("view")
 def replicate_playbook(job_id: int):
     job = db.get_job(job_id)
     if not job:
@@ -875,17 +1215,20 @@ def replicate_playbook(job_id: int):
 # ── Notifications ─────────────────────────────────────────────────────────────
 
 @app.route("/api/notifications/config", methods=["GET"])
+@require_permission("view")
 def get_notify_config():
     return jsonify({"config": notifier.get_config()})
 
 
 @app.route("/api/notifications/config", methods=["POST"])
+@require_permission("notification_settings")
 def set_notify_config():
     payload = request.get_json(force=True) or {}
     return jsonify({"config": notifier.save_config(payload)})
 
 
 @app.route("/api/notifications/subscriptions", methods=["GET"])
+@require_permission("view")
 def get_notify_subscriptions():
     return jsonify({
         "subscriptions": notifier.get_subscriptions(),
@@ -894,6 +1237,7 @@ def get_notify_subscriptions():
 
 
 @app.route("/api/notifications/subscriptions", methods=["POST"])
+@require_permission("notification_settings")
 def set_notify_subscriptions():
     payload = request.get_json(force=True) or {}
     instance_ids = [int(i) for i in payload.get("instance_ids", [])]
@@ -901,16 +1245,19 @@ def set_notify_subscriptions():
 
 
 @app.route("/api/notifications/test", methods=["POST"])
+@require_permission("notification_settings")
 def test_notify():
     return jsonify(notifier.test())
 
 
 @app.route("/api/alerts/active", methods=["GET"])
+@require_permission("view")
 def active_alerts():
     return jsonify({"alerts": db.list_unresolved_alerts()})
 
 
 @app.route("/api/alerts/<int:alert_id>/acknowledge", methods=["POST"])
+@require_permission("acknowledge_alerts")
 def acknowledge_alert(alert_id: int):
     payload = request.get_json(force=True) or {}
     acknowledged_by = str(payload.get("acknowledged_by") or "ui-user")
@@ -921,6 +1268,7 @@ def acknowledge_alert(alert_id: int):
 # ── Scheduler ─────────────────────────────────────────────────────────────────
 
 @app.route("/api/scheduler/jobs", methods=["GET"])
+@require_permission("view")
 def scheduler_jobs():
     return jsonify({"jobs": scheduler.list_jobs()})
 
