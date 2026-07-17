@@ -27,6 +27,12 @@ except Exception:
     _openai = None
 
 from agent.core import ClaudeClient
+from agent.crypto_utils import (
+    encrypt_value,
+    decrypt_value,
+    ssh_key_fingerprint,
+    validate_master_key,
+)
 from agent.db import Database
 from agent.notify import Notifier
 from agent.replicate import Replicator
@@ -34,6 +40,9 @@ from agent.report import generate_study_html
 from agent.scheduler import HealthScheduler
 from agent.ssh import SSHManager
 from agent.study import StudyRunner
+
+# Hard-fail on startup if the master encryption key is absent.
+validate_master_key()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -94,8 +103,29 @@ def _safe_err(exc: Exception, status: int = 500):
     return jsonify({"error": "An internal error occurred. Check server logs."}), status
 
 
+def _enrich_instance(instance: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Attach the ``_ssh_key`` record (from *ssh_keys* table) for paste/upload instances."""
+    if instance is None:
+        return None
+    if instance.get("auth_type") in ("key_paste", "key_upload"):
+        instance["_ssh_key"] = db.get_ssh_key(instance["id"])
+    return instance
+
+
+def _safe_instance_for_api(instance: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Return a copy of *instance* safe to send to the browser (no raw credentials)."""
+    if instance is None:
+        return None
+    out = {k: v for k, v in instance.items() if k not in ("password", "_ssh_key")}
+    if instance.get("auth_type") in ("key_paste", "key_upload"):
+        key_rec = db.get_ssh_key(instance["id"])
+        out["key_fingerprint"] = key_rec["key_fingerprint"] if key_rec else None
+        out.pop("key_path", None)
+    return out
+
+
 def _get_instance(instance_id: int) -> Optional[Dict[str, Any]]:
-    return db.get_instance(instance_id)
+    return _enrich_instance(db.get_instance(instance_id))
 
 
 def _safe_dumps(value: Any) -> str:
@@ -120,16 +150,85 @@ def add_instance():
     for field in ("label", "host", "username", "auth_type"):
         if not payload.get(field):
             return _err(f"missing required field: {field}")
-    iid = db.add_instance(payload)
-    instance = db.get_instance(iid)
-    ok, reason = ssh.test_connection(instance)
-    db.update_instance_status(iid, "online" if ok else "auth_error")
-    return jsonify({"instance": db.get_instance(iid), "ssh_test": {"ok": ok, "reason": reason}})
+
+    auth_type = payload["auth_type"]
+    if auth_type not in ("key", "key_paste", "key_upload", "password"):
+        return _err("invalid auth_type")
+
+    # ── Validate & fingerprint the key before persisting anything ─────────────
+    key_pem: Optional[str] = None
+    passphrase: Optional[str] = payload.get("passphrase") or None
+    fingerprint: Optional[str] = None
+
+    if auth_type in ("key_paste", "key_upload"):
+        key_pem = (payload.get("key_content") or "").strip()
+        if not key_pem:
+            return _err("key_content is required for auth_type key_paste / key_upload")
+        try:
+            fingerprint = ssh_key_fingerprint(key_pem, passphrase)
+        except ValueError as exc:
+            return _err(f"Invalid private key: {exc}")
+
+    # ── Build a temporary instance dict to test the connection first ──────────
+    test_instance: Dict[str, Any] = {
+        "host": payload["host"],
+        "port": int(payload.get("port", 22)),
+        "username": payload["username"],
+        "auth_type": auth_type,
+        "key_path": payload.get("key_path"),
+        "password": payload.get("password"),
+    }
+    if key_pem:
+        test_instance["_ssh_key"] = {
+            "encrypted_key_blob": encrypt_value(key_pem),
+            "passphrase_encrypted": encrypt_value(passphrase) if passphrase else None,
+        }
+
+    ok, reason = ssh.test_connection(test_instance)
+    if not ok:
+        # Log the full reason server-side; never send raw exception text to callers.
+        log.warning("SSH test failed for %s: %s", payload.get("host"), reason)
+        return jsonify({
+            "ssh_test": {"ok": False},
+            "error": "SSH connection test failed — check host, port, and credentials (see server logs for details)",
+        }), 422
+
+    # ── Persist only after a successful test ──────────────────────────────────
+    db_payload = {
+        "label": payload["label"],
+        "host": payload["host"],
+        "port": int(payload.get("port", 22)),
+        "username": payload["username"],
+        "auth_type": auth_type,
+        "tags": payload.get("tags", []),
+    }
+    if auth_type == "key":
+        db_payload["key_path"] = payload.get("key_path")
+    elif auth_type == "password":
+        db_payload["password"] = payload.get("password")
+    # key_paste / key_upload: key_path and password intentionally omitted
+
+    iid = db.add_instance(db_payload)
+
+    if key_pem and fingerprint:
+        db.store_ssh_key(
+            iid,
+            encrypted_key_blob=encrypt_value(key_pem),
+            key_fingerprint=fingerprint,
+            passphrase_encrypted=encrypt_value(passphrase) if passphrase else None,
+        )
+
+    db.update_instance_status(iid, "online")
+    return jsonify({
+        "instance": _safe_instance_for_api(db.get_instance(iid)),
+        "ssh_test": {"ok": True, "reason": "ok"},
+    })
 
 
 @app.route("/api/instances", methods=["GET"])
 def list_instances():
-    return jsonify({"instances": db.list_instances()})
+    raw = db.list_instances()
+    return jsonify({"instances": [_safe_instance_for_api(i) for i in raw]})
 
 
 @app.route("/api/instances/<int:instance_id>", methods=["DELETE"])

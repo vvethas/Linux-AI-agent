@@ -5,6 +5,8 @@ from typing import Any, Dict, Optional, Tuple
 
 import paramiko
 
+from agent.crypto_utils import decrypt_value, load_private_key
+
 
 class SSHManager:
     def __init__(self):
@@ -38,8 +40,22 @@ class SSHManager:
             "banner_timeout": timeout,
             "auth_timeout": timeout,
         }
-        if instance.get("auth_type") == "password":
+        auth_type = instance.get("auth_type", "key")
+        if auth_type == "password":
             connect_kwargs["password"] = instance.get("password")
+            connect_kwargs["look_for_keys"] = False
+            connect_kwargs["allow_agent"] = False
+        elif auth_type in ("key_paste", "key_upload"):
+            # Key is stored encrypted; decrypt in memory — never written to disk.
+            key_record = instance.get("_ssh_key")  # injected by server before calling connect
+            if not key_record:
+                raise ValueError("No encrypted key record found for this instance")
+            key_pem = decrypt_value(key_record["encrypted_key_blob"])
+            passphrase: Optional[str] = None
+            if key_record.get("passphrase_encrypted"):
+                passphrase = decrypt_value(key_record["passphrase_encrypted"])
+            pkey = load_private_key(key_pem, passphrase)
+            connect_kwargs["pkey"] = pkey
             connect_kwargs["look_for_keys"] = False
             connect_kwargs["allow_agent"] = False
         else:

@@ -3,3 +3,4 @@ requests>=2.31
 paramiko>=3.4
 apscheduler>=3.10
 openai>=1.0
+cryptography>=42.0

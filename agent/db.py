@@ -19,6 +19,7 @@ class Database:
     def _connect(self):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
         try:
             yield conn
             conn.commit()
@@ -27,6 +28,38 @@ class Database:
 
     def init_db(self) -> None:
         with self._lock, self._connect() as conn:
+            # Migrate instances table if the auth_type CHECK constraint is too narrow.
+            # SQLite does not support ALTER TABLE … MODIFY COLUMN, so we recreate the
+            # table when the old definition is detected.
+            old_schema = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='instances'"
+            ).fetchone()
+            if old_schema and "CHECK(auth_type IN ('key','password'))" in (old_schema[0] or ""):
+                conn.executescript(
+                    """
+                    PRAGMA foreign_keys=OFF;
+                    CREATE TABLE IF NOT EXISTS instances_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        label TEXT NOT NULL,
+                        host TEXT NOT NULL,
+                        port INTEGER NOT NULL DEFAULT 22,
+                        username TEXT NOT NULL,
+                        auth_type TEXT NOT NULL
+                            CHECK(auth_type IN ('key','key_paste','key_upload','password')),
+                        key_path TEXT,
+                        password TEXT,
+                        tags TEXT DEFAULT '[]',
+                        added_at TEXT NOT NULL,
+                        last_seen TEXT,
+                        last_status TEXT DEFAULT 'unknown'
+                    );
+                    INSERT INTO instances_new SELECT * FROM instances;
+                    DROP TABLE instances;
+                    ALTER TABLE instances_new RENAME TO instances;
+                    PRAGMA foreign_keys=ON;
+                    """
+                )
+
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS instances (
@@ -35,7 +68,8 @@ class Database:
                     host TEXT NOT NULL,
                     port INTEGER NOT NULL DEFAULT 22,
                     username TEXT NOT NULL,
-                    auth_type TEXT NOT NULL CHECK(auth_type IN ('key','password')),
+                    auth_type TEXT NOT NULL
+                        CHECK(auth_type IN ('key','key_paste','key_upload','password')),
                     key_path TEXT,
                     password TEXT,
                     tags TEXT DEFAULT '[]',
@@ -95,6 +129,16 @@ class Database:
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL,
                     updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS ssh_keys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    instance_id INTEGER NOT NULL,
+                    encrypted_key_blob TEXT NOT NULL,
+                    key_fingerprint TEXT NOT NULL,
+                    passphrase_encrypted TEXT,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(instance_id) REFERENCES instances(id) ON DELETE CASCADE
                 );
                 """
             )
@@ -167,6 +211,39 @@ class Database:
                 "UPDATE instances SET last_status=?, last_seen=? WHERE id=?",
                 (status, self._now(), instance_id),
             )
+
+    # ── SSH Keys (encrypted at rest) ─────────────────────────────────────────
+
+    def store_ssh_key(
+        self,
+        instance_id: int,
+        encrypted_key_blob: str,
+        key_fingerprint: str,
+        passphrase_encrypted: Optional[str] = None,
+    ) -> int:
+        with self._lock, self._connect() as conn:
+            # Replace any existing key for this instance.
+            conn.execute("DELETE FROM ssh_keys WHERE instance_id=?", (instance_id,))
+            cur = conn.execute(
+                """
+                INSERT INTO ssh_keys
+                    (instance_id, encrypted_key_blob, key_fingerprint, passphrase_encrypted, created_at)
+                VALUES (?,?,?,?,?)
+                """,
+                (instance_id, encrypted_key_blob, key_fingerprint, passphrase_encrypted, self._now()),
+            )
+            return int(cur.lastrowid)
+
+    def get_ssh_key(self, instance_id: int) -> Optional[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM ssh_keys WHERE instance_id=?", (instance_id,)
+            ).fetchone()
+        return self._row_to_dict(row)
+
+    def delete_ssh_key_for_instance(self, instance_id: int) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute("DELETE FROM ssh_keys WHERE instance_id=?", (instance_id,))
 
     # ── Jobs ─────────────────────────────────────────────────────────────────
 
