@@ -140,6 +140,26 @@ class Database:
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(instance_id) REFERENCES instances(id) ON DELETE CASCADE
                 );
+
+                CREATE TABLE IF NOT EXISTS alerts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    instance_id INTEGER NOT NULL,
+                    severity TEXT NOT NULL CHECK(severity IN ('critical','warning','info')),
+                    message TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('active','acknowledged','resolved')) DEFAULT 'active',
+                    first_seen TEXT NOT NULL,
+                    last_notified TEXT,
+                    acknowledged_by TEXT,
+                    acknowledged_at TEXT,
+                    resolved_at TEXT,
+                    FOREIGN KEY(instance_id) REFERENCES instances(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS alert_subscriptions (
+                    instance_id INTEGER PRIMARY KEY,
+                    notify_enabled INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY(instance_id) REFERENCES instances(id) ON DELETE CASCADE
+                );
                 """
             )
 
@@ -204,6 +224,33 @@ class Database:
     def delete_instance(self, instance_id: int) -> None:
         with self._lock, self._connect() as conn:
             conn.execute("DELETE FROM instances WHERE id=?", (instance_id,))
+
+    def list_alert_subscriptions(self) -> List[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT instance_id, notify_enabled FROM alert_subscriptions ORDER BY instance_id ASC"
+            ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def set_alert_subscription(self, instance_id: int, notify_enabled: bool) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO alert_subscriptions (instance_id, notify_enabled)
+                VALUES (?,?)
+                ON CONFLICT(instance_id) DO UPDATE SET notify_enabled=excluded.notify_enabled
+                """,
+                (instance_id, int(bool(notify_enabled))),
+            )
+
+    def set_alert_subscriptions_bulk(self, instance_ids: List[int]) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute("DELETE FROM alert_subscriptions")
+            for instance_id in instance_ids:
+                conn.execute(
+                    "INSERT INTO alert_subscriptions (instance_id, notify_enabled) VALUES (?,1)",
+                    (instance_id,),
+                )
 
     def update_instance_status(self, instance_id: int, status: str) -> None:
         with self._lock, self._connect() as conn:
@@ -468,3 +515,129 @@ class Database:
         key = f"check_log_{instance_id}"
         data = self.get_config_json(key, default={"entries": []})
         return data.get("entries", [])
+
+    # ── Alerts ────────────────────────────────────────────────────────────────
+
+    def find_open_alert(
+        self,
+        instance_id: int,
+        severity: str,
+        message: str,
+    ) -> Optional[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM alerts
+                WHERE instance_id=? AND severity=? AND message=? AND status IN ('active','acknowledged')
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (instance_id, severity, message),
+            ).fetchone()
+        return self._row_to_dict(row)
+
+    def create_alert(
+        self,
+        instance_id: int,
+        severity: str,
+        message: str,
+        status: str = "active",
+        last_notified: Optional[str] = None,
+    ) -> int:
+        now = self._now()
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO alerts
+                    (instance_id, severity, message, status, first_seen, last_notified)
+                VALUES (?,?,?,?,?,?)
+                """,
+                (instance_id, severity, message, status, now, last_notified),
+            )
+            return int(cur.lastrowid)
+
+    def touch_alert_notification(self, alert_id: int) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE alerts SET last_notified=? WHERE id=?",
+                (self._now(), alert_id),
+            )
+
+    def acknowledge_alert(self, alert_id: int, acknowledged_by: str) -> None:
+        now = self._now()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE alerts
+                SET status='acknowledged',
+                    acknowledged_by=?,
+                    acknowledged_at=?
+                WHERE id=? AND status='active'
+                """,
+                (acknowledged_by, now, alert_id),
+            )
+
+    def resolve_alert(self, alert_id: int) -> None:
+        now = self._now()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE alerts
+                SET status='resolved',
+                    resolved_at=?
+                WHERE id=? AND status IN ('active','acknowledged')
+                """,
+                (now, alert_id),
+            )
+
+    def resolve_alerts_for_condition(self, instance_id: int, severity: str, message: str) -> None:
+        now = self._now()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE alerts
+                SET status='resolved', resolved_at=?
+                WHERE instance_id=? AND severity=? AND message=? AND status IN ('active','acknowledged')
+                """,
+                (now, instance_id, severity, message),
+            )
+
+    def get_alert(self, alert_id: int) -> Optional[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute("SELECT * FROM alerts WHERE id=?", (alert_id,)).fetchone()
+        return self._row_to_dict(row)
+
+    def list_unresolved_alerts(self) -> List[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT a.*, i.label AS instance_label, i.tags AS instance_tags
+                FROM alerts a
+                JOIN instances i ON i.id = a.instance_id
+                WHERE a.status IN ('active','acknowledged')
+                ORDER BY
+                    CASE a.severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END,
+                    a.first_seen DESC
+                """
+            ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def list_due_critical_alerts(self, renotify_minutes: int) -> List[Dict[str, Any]]:
+        renotify_minutes = max(1, int(renotify_minutes or 5))
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT a.*, i.label AS instance_label, i.host AS instance_host
+                FROM alerts a
+                JOIN instances i ON i.id = a.instance_id
+                WHERE a.status='active'
+                  AND a.severity='critical'
+                  AND (
+                    a.last_notified IS NULL
+                    OR datetime(a.last_notified) <= datetime('now', '-' || ? || ' minutes')
+                  )
+                ORDER BY a.first_seen ASC
+                """,
+                (renotify_minutes,),
+            ).fetchall()
+        return [self._row_to_dict(r) for r in rows]

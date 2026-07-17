@@ -352,6 +352,7 @@ def dashboard():
     online = sum(1 for i in instances if i.get("last_status") == "online")
     avg_health = round(sum(scores) / len(scores), 1) if scores else 0
     activity = db.list_jobs()[:10]
+    active_alerts = db.list_unresolved_alerts()
 
     return jsonify({
         "stats": {
@@ -362,6 +363,7 @@ def dashboard():
         },
         "tiles": tiles,
         "activity": activity,
+        "active_alerts": active_alerts,
     })
 
 
@@ -879,9 +881,37 @@ def set_notify_config():
     return jsonify({"config": notifier.save_config(payload)})
 
 
+@app.route("/api/notifications/subscriptions", methods=["GET"])
+def get_notify_subscriptions():
+    return jsonify({
+        "subscriptions": notifier.get_subscriptions(),
+        "instances": [_safe_instance_for_api(i) for i in db.list_instances()],
+    })
+
+
+@app.route("/api/notifications/subscriptions", methods=["POST"])
+def set_notify_subscriptions():
+    payload = request.get_json(force=True) or {}
+    instance_ids = [int(i) for i in payload.get("instance_ids", [])]
+    return jsonify({"subscriptions": notifier.save_subscriptions(instance_ids)})
+
+
 @app.route("/api/notifications/test", methods=["POST"])
 def test_notify():
     return jsonify(notifier.test())
+
+
+@app.route("/api/alerts/active", methods=["GET"])
+def active_alerts():
+    return jsonify({"alerts": db.list_unresolved_alerts()})
+
+
+@app.route("/api/alerts/<int:alert_id>/acknowledge", methods=["POST"])
+def acknowledge_alert(alert_id: int):
+    payload = request.get_json(force=True) or {}
+    acknowledged_by = str(payload.get("acknowledged_by") or "ui-user")
+    db.acknowledge_alert(alert_id, acknowledged_by)
+    return jsonify({"alert": db.get_alert(alert_id)})
 
 
 # ── Scheduler ─────────────────────────────────────────────────────────────────
