@@ -92,6 +92,9 @@ scheduler = HealthScheduler(db, ssh, study_runner, notifier)
 # Initialise session-based auth (sets secret_key, registers before_request)
 init_auth(app, db)
 
+# Seed the default admin account if no users exist yet
+db.seed_default_admin()
+
 # In-memory job sessions: {job_id: {plan, history, instance_id, type, started}}
 sessions: Dict[int, Dict[str, Any]] = {}
 
@@ -173,6 +176,7 @@ def auth_me():
             "email": user["email"] if user else "",
         },
         "role": role,
+        "must_change_password": bool(_g.get("must_change_password")),
     })
 
 
@@ -203,7 +207,9 @@ def auth_login():
             if r:
                 role_name = r["name"]
                 break
-    return jsonify({"ok": True, "role": role_name, "name": user["name"]})
+    must_change = bool(user.get("must_change_password"))
+    return jsonify({"ok": True, "role": role_name, "name": user["name"],
+                    "must_change_password": must_change})
 
 
 @app.route("/api/auth/logout", methods=["POST"])
@@ -229,6 +235,27 @@ def auth_set_password():
     session.clear()
     session["user_id"] = user["id"]
     return jsonify({"ok": True, "name": user["name"]})
+
+
+@app.route("/api/auth/change_password", methods=["POST"])
+def auth_change_password():
+    """Forced password change for accounts with must_change_password=1.
+
+    Requires an active session.  Sets the new password and clears the
+    must_change_password flag so normal access is restored.
+    """
+    from flask import g as _g
+    user = _g.get("current_user")
+    if not user:
+        return _err("Authentication required", 401)
+    payload = request.get_json(force=True) or {}
+    password = str(payload.get("password", ""))
+    if not password:
+        return _err("password is required")
+    if len(password) < 8:
+        return _err("password must be at least 8 characters")
+    db.set_user_password(user["id"], generate_password_hash(password))
+    return jsonify({"ok": True})
 
 
 # ── User management (Admin only) ──────────────────────────────────────────────

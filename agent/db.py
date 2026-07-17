@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import secrets
 import sqlite3
@@ -6,6 +7,10 @@ import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+from werkzeug.security import generate_password_hash
+
+log = logging.getLogger(__name__)
 
 
 class Database:
@@ -176,7 +181,8 @@ class Database:
                     invite_token TEXT,
                     status TEXT NOT NULL DEFAULT 'invited'
                         CHECK(status IN ('active','invited','disabled')),
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    must_change_password INTEGER NOT NULL DEFAULT 0
                 );
 
                 CREATE TABLE IF NOT EXISTS groups (
@@ -196,6 +202,17 @@ class Database:
             conn.execute("INSERT OR IGNORE INTO roles (name) VALUES ('Admin')")
             conn.execute("INSERT OR IGNORE INTO roles (name) VALUES ('Operator')")
             conn.execute("INSERT OR IGNORE INTO roles (name) VALUES ('Viewer')")
+
+            # Migration: add must_change_password column if it does not exist yet
+            existing_cols = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(users)").fetchall()
+            }
+            if "must_change_password" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE users ADD COLUMN "
+                    "must_change_password INTEGER NOT NULL DEFAULT 0"
+                )
 
     @staticmethod
     def _now() -> str:
@@ -700,6 +717,39 @@ class Database:
             row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
         return int(row[0])
 
+    def seed_default_admin(self) -> None:
+        """Seed a default admin account if the users table is empty.
+
+        Called once at application startup.  The account is seeded with
+        must_change_password=1 so the operator is forced to choose a new
+        password on first login.
+        """
+        with self._lock, self._connect() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+            if count > 0:
+                return
+            admin_role = conn.execute(
+                "SELECT id FROM roles WHERE name='Admin'"
+            ).fetchone()
+            if not admin_role:
+                return
+            now = self._now()
+            pw_hash = generate_password_hash("admin")
+            conn.execute(
+                """
+                INSERT INTO users
+                    (name, email, password_hash, role_id, invite_token,
+                     status, created_at, must_change_password)
+                VALUES (?,?,?,?,NULL,'active',?,1)
+                """,
+                ("admin", "admin@localhost", pw_hash, int(admin_role[0]), now),
+            )
+        log.warning(
+            "Default admin account created — "
+            "email: admin@localhost, password: admin — "
+            "change required on first login"
+        )
+
     def create_user(
         self,
         name: str,
@@ -768,6 +818,7 @@ class Database:
             "status": "status=?",
             "password_hash": "password_hash=?",
             "invite_token": "invite_token=?",
+            "must_change_password": "must_change_password=?",
         }
         parts: List[str] = []
         params: List[Any] = []
@@ -785,7 +836,8 @@ class Database:
     def set_user_password(self, user_id: int, password_hash: str) -> None:
         with self._lock, self._connect() as conn:
             conn.execute(
-                "UPDATE users SET password_hash=?, status='active', invite_token=NULL WHERE id=?",
+                "UPDATE users SET password_hash=?, status='active', "
+                "invite_token=NULL, must_change_password=0 WHERE id=?",
                 (password_hash, user_id),
             )
 

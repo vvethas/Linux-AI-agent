@@ -612,6 +612,20 @@ table.jobs-table{width:100%;border-collapse:collapse;font-size:.83rem}
   </div>
 </div>
 
+<!-- Forced Change Password Modal -->
+<div class="modal-overlay" id="forceChangePasswordModal" style="display:none">
+  <div class="modal" style="max-width:380px">
+    <h2>Change your password</h2>
+    <p class="muted" style="margin-bottom:14px;font-size:.84rem">You must set a new password before continuing. The default password must not be kept.</p>
+    <div class="form-row"><label>New password <span class="muted">(min 8 chars)</span></label><input id="fcp-password" type="password"></div>
+    <div class="form-row"><label>Confirm password</label><input id="fcp-confirm" type="password"></div>
+    <div id="fcpError" class="error-text" style="font-size:.8rem;margin-bottom:8px;display:none"></div>
+    <div class="form-actions">
+      <button class="btn-primary" onclick="submitForceChangePassword()">Set new password</button>
+    </div>
+  </div>
+</div>
+
 <!-- Add / Edit User Modal -->
 <div class="modal-overlay" id="userModal">
   <div class="modal">
@@ -1723,6 +1737,10 @@ async function checkAuth() {
       currentUserRole = data.role;
       const badge = document.getElementById('settingsUserBadge');
       if (badge) badge.textContent = data.user?.name ? data.user.name + ' (' + data.role + ')' : data.role;
+      if (data.must_change_password) {
+        showForceChangePasswordModal();
+        return false;
+      }
       return true;
     }
     // 401 → show login
@@ -1735,6 +1753,10 @@ async function checkAuth() {
 
 function showLoginModal() {
   document.getElementById('loginModal').style.display = 'grid';
+}
+
+function showForceChangePasswordModal() {
+  document.getElementById('forceChangePasswordModal').style.display = 'grid';
 }
 
 async function submitLogin() {
@@ -1752,6 +1774,10 @@ async function submitLogin() {
     if (!res.ok) { errEl.textContent = data.error || 'Login failed'; errEl.style.display = ''; return; }
     document.getElementById('loginModal').style.display = 'none';
     currentUserRole = data.role;
+    if (data.must_change_password) {
+      showForceChangePasswordModal();
+      return;
+    }
     // Re-bootstrap
     setMode(currentMode);
     loadInstances();
@@ -1768,6 +1794,34 @@ async function submitLogin() {
 document.getElementById('login-password').addEventListener('keydown', e => {
   if (e.key === 'Enter') submitLogin();
 });
+
+async function submitForceChangePassword() {
+  const password = document.getElementById('fcp-password').value;
+  const confirm = document.getElementById('fcp-confirm').value;
+  const errEl = document.getElementById('fcpError');
+  errEl.style.display = 'none';
+  if (password !== confirm) { errEl.textContent = 'Passwords do not match'; errEl.style.display = ''; return; }
+  if (password.length < 8) { errEl.textContent = 'Password must be at least 8 characters'; errEl.style.display = ''; return; }
+  try {
+    const res = await fetch('/api/auth/change_password', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({password})
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error || 'Error'; errEl.style.display = ''; return; }
+    document.getElementById('forceChangePasswordModal').style.display = 'none';
+    // Re-bootstrap now that the password has been changed
+    setMode(currentMode);
+    loadInstances();
+    loadDashboard();
+    loadNotifyConfig();
+    loadNotifySubscriptions();
+    pollMonitoring();
+    initHoverNav();
+    initKeyboardShortcuts();
+  } catch { errEl.textContent = 'Network error'; errEl.style.display = ''; }
+}
 
 async function submitSetPassword() {
   const token = document.getElementById('invite-token').value;

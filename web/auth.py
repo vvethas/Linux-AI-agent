@@ -83,12 +83,16 @@ def init_auth(app: Flask, db_instance) -> None:
         else:
             g.current_user = None
         g.user_role = _resolve_role(db_instance, g.current_user)
+        g.must_change_password = bool(
+            g.current_user and g.current_user.get("must_change_password")
+        )
 
 
 def require_permission(permission: str):
     """
     Route decorator: returns 401 if not authenticated, 403 if the current
-    user's effective role does not include *permission*.
+    user's effective role does not include *permission*, or 403 with a
+    specific error if a forced password change is pending.
     """
     def decorator(f):
         @wraps(f)
@@ -96,6 +100,8 @@ def require_permission(permission: str):
             role = g.get("user_role")
             if role is None:
                 return jsonify({"error": "Authentication required"}), 401
+            if g.get("must_change_password"):
+                return jsonify({"error": "Password change required"}), 403
             if permission not in PERMISSION_MATRIX.get(role, set()):
                 return jsonify({"error": "Forbidden"}), 403
             return f(*args, **kwargs)
