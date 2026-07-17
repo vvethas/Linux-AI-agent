@@ -193,6 +193,8 @@ table.jobs-table{width:100%;border-collapse:collapse;font-size:.83rem}
 /* ── Settings ── */
 .settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media(max-width:700px){.settings-grid{grid-template-columns:1fr}}
+/* ── Users & access ── */
+.access-subtab.active{background:var(--accent);color:#0b0f14;border-color:var(--accent)}
 .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)}
 .toggle-row label{font-size:.85rem}
 .instance-checklist{margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
@@ -471,6 +473,42 @@ table.jobs-table{width:100%;border-collapse:collapse;font-size:.83rem}
           </div>
         </div>
 
+        <!-- Settings tab (Users & access) -->
+        <div id="tab-settings" class="hidden full-view">
+          <div class="panel">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+              <h2 style="margin-bottom:0">Users &amp; access</h2>
+              <span id="settingsUserBadge" class="muted" style="font-size:.75rem"></span>
+            </div>
+            <!-- Sub-tabs -->
+            <div style="display:flex;gap:2px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:10px">
+              <button class="btn-sm access-subtab active" data-subtab="users" onclick="switchAccessTab('users')">Users</button>
+              <button class="btn-sm access-subtab" data-subtab="groups" onclick="switchAccessTab('groups')">Groups</button>
+            </div>
+
+            <!-- Users sub-tab -->
+            <div id="subtab-users">
+              <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+                <button class="btn-primary" style="font-size:.82rem;padding:5px 12px" onclick="showAddUserModal()">+ Add user</button>
+              </div>
+              <table class="jobs-table" id="usersTable">
+                <thead><tr>
+                  <th>Name</th><th>Email</th><th>Group</th><th>Role</th><th>Status</th><th></th>
+                </tr></thead>
+                <tbody id="usersTableBody"><tr><td colspan="6" class="muted" style="padding:16px">Loading…</td></tr></tbody>
+              </table>
+            </div>
+
+            <!-- Groups sub-tab -->
+            <div id="subtab-groups" class="hidden">
+              <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+                <button class="btn-primary" style="font-size:.82rem;padding:5px 12px" onclick="showCreateGroupModal()">+ Create group</button>
+              </div>
+              <div id="groupsList"><div class="muted" style="padding:16px">Loading…</div></div>
+            </div>
+          </div>
+        </div>
+
       </div><!-- /content-area -->
     </div><!-- /workspace -->
 
@@ -546,6 +584,105 @@ table.jobs-table{width:100%;border-collapse:collapse;font-size:.83rem}
   <div class="side-panel-body" id="sidePanelBody"></div>
 </div>
 
+<!-- Login Modal -->
+<div class="modal-overlay" id="loginModal" style="display:none">
+  <div class="modal" style="max-width:360px">
+    <h2>Sign in</h2>
+    <div class="form-row"><label>Email</label><input id="login-email" type="email" placeholder="you@example.com" autocomplete="username"></div>
+    <div class="form-row"><label>Password</label><input id="login-password" type="password" autocomplete="current-password"></div>
+    <div id="loginError" class="error-text" style="font-size:.8rem;margin-bottom:8px;display:none"></div>
+    <div class="form-actions">
+      <button class="btn-primary" onclick="submitLogin()">Sign in</button>
+    </div>
+  </div>
+</div>
+
+<!-- Set Password (Invite) Modal -->
+<div class="modal-overlay" id="inviteModal" style="display:none">
+  <div class="modal" style="max-width:380px">
+    <h2>Set your password</h2>
+    <p class="muted" style="margin-bottom:14px;font-size:.84rem">Welcome! Choose a password to activate your account.</p>
+    <div class="form-row"><label>Password <span class="muted">(min 8 chars)</span></label><input id="invite-password" type="password"></div>
+    <div class="form-row"><label>Confirm password</label><input id="invite-confirm" type="password"></div>
+    <input type="hidden" id="invite-token">
+    <div id="inviteError" class="error-text" style="font-size:.8rem;margin-bottom:8px;display:none"></div>
+    <div class="form-actions">
+      <button class="btn-primary" onclick="submitSetPassword()">Activate account</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add / Edit User Modal -->
+<div class="modal-overlay" id="userModal">
+  <div class="modal">
+    <h2 id="userModalTitle">Add user</h2>
+    <input type="hidden" id="userModalId">
+    <div class="form-row"><label>Name</label><input id="um-name" type="text" placeholder="Alice Smith"></div>
+    <div class="form-row"><label>Email</label><input id="um-email" type="email" placeholder="alice@example.com"></div>
+    <div class="form-row">
+      <label>Access via</label>
+      <select id="um-assign-type" onchange="umAssignTypeChange()">
+        <option value="role">Assign role directly</option>
+        <option value="group">Add to group</option>
+      </select>
+    </div>
+    <div class="form-row" id="um-role-row">
+      <label>Role</label>
+      <select id="um-role-id"></select>
+    </div>
+    <div class="form-row hidden" id="um-group-row">
+      <label>Group</label>
+      <select id="um-group-id"></select>
+    </div>
+    <div id="userModalError" class="error-text" style="font-size:.8rem;margin-bottom:8px;display:none"></div>
+    <div id="userModalInviteLink" class="hidden" style="margin-bottom:8px;padding:10px;background:var(--surface);border-radius:6px;font-size:.82rem">
+      <div class="muted" style="margin-bottom:4px">Invite link (share with user):</div>
+      <div id="userModalInviteUrl" style="font-family:'JetBrains Mono',monospace;word-break:break-all;color:var(--accent)"></div>
+    </div>
+    <div class="form-actions">
+      <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary" id="userModalBtn" onclick="submitUserModal()">Add user</button>
+    </div>
+  </div>
+</div>
+
+<!-- Create / Edit Group Modal -->
+<div class="modal-overlay" id="groupModal">
+  <div class="modal">
+    <h2 id="groupModalTitle">Create group</h2>
+    <input type="hidden" id="groupModalId">
+    <div class="form-row"><label>Group name</label><input id="gm-name" type="text" placeholder="Ops team"></div>
+    <div class="form-row">
+      <label>Role</label>
+      <select id="gm-role-id"></select>
+    </div>
+    <div id="groupModalError" class="error-text" style="font-size:.8rem;margin-bottom:8px;display:none"></div>
+    <div class="form-actions">
+      <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary" id="groupModalBtn" onclick="submitGroupModal()">Create group</button>
+    </div>
+  </div>
+</div>
+
+<!-- Manage Group Members Modal -->
+<div class="modal-overlay" id="membersModal">
+  <div class="modal" style="max-width:500px">
+    <h2 id="membersModalTitle">Group members</h2>
+    <input type="hidden" id="membersGroupId">
+    <div id="membersList" style="margin-bottom:14px;max-height:240px;overflow-y:auto"></div>
+    <div style="border-top:1px solid var(--border);padding-top:12px">
+      <div class="muted" style="font-size:.78rem;margin-bottom:8px">Add user to group</div>
+      <div style="display:flex;gap:8px">
+        <select id="memberAddSelect" style="flex:1"></select>
+        <button class="btn-sm" onclick="addMemberToGroup()">Add</button>
+      </div>
+    </div>
+    <div class="form-actions" style="margin-top:12px">
+      <button class="btn-secondary" onclick="closeModal()">Close</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ── State ──────────────────────────────────────────────────────────────────
 let instances = [];
@@ -561,48 +698,63 @@ let currentTab = 'dashboard';
 let monitoringData = {};
 let _evtSource = null;
 let alertSubscriptions = new Set();
+let currentUserRole = null;
+let rolesCache = [];
+let groupsCache = [];
 
 // ── Bootstrap ───────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
-  setMode(currentMode);
-  loadInstances();
-  loadDashboard();
-  loadNotifyConfig();
-  loadNotifySubscriptions();
-  pollMonitoring();
-  setInterval(loadInstances, 30000);
-  setInterval(pollMonitoring, 30000);
-  setInterval(() => {
-    if (!document.getElementById('tab-dashboard').classList.contains('hidden')) loadDashboard();
-  }, 60000);
-  initHoverNav();
-  initKeyboardShortcuts();
+  // Check for invite token in URL path /invite/<token>
+  const pathParts = window.location.pathname.split('/');
+  if (pathParts[1] === 'invite' && pathParts[2]) {
+    document.getElementById('invite-token').value = pathParts[2];
+    document.getElementById('inviteModal').style.display = 'grid';
+    return;
+  }
+  checkAuth().then(authed => {
+    if (!authed) return;
+    setMode(currentMode);
+    loadInstances();
+    loadDashboard();
+    loadNotifyConfig();
+    loadNotifySubscriptions();
+    pollMonitoring();
+    setInterval(loadInstances, 30000);
+    setInterval(pollMonitoring, 30000);
+    setInterval(() => {
+      if (!document.getElementById('tab-dashboard').classList.contains('hidden')) loadDashboard();
+    }, 60000);
+    initHoverNav();
+    initKeyboardShortcuts();
+  });
 });
 
 // ── Tab switching ────────────────────────────────────────────────────────────
 function switchTab(name) {
   currentTab = name;
-  const showTabId = (name === 'settings') ? 'alerts' : name;
-  const tabIds = ['dashboard','chat','jobs','studies','alerts'];
+  const tabIds = ['dashboard','chat','jobs','studies','alerts','settings'];
   tabIds.forEach(t => {
     const el = document.getElementById('tab-' + t);
+    if (!el) return;
     if (t === 'chat') { el.style.display = 'none'; }
     else { el.classList.add('hidden'); }
   });
   const metricsCol = document.getElementById('metricsCol');
-  if (showTabId === 'chat') {
+  if (name === 'chat') {
     document.getElementById('tab-chat').style.display = 'flex';
     metricsCol.style.display = 'flex';
   } else {
-    document.getElementById('tab-' + showTabId).classList.remove('hidden');
+    const el = document.getElementById('tab-' + name);
+    if (el) el.classList.remove('hidden');
     metricsCol.style.display = 'none';
   }
   document.querySelectorAll('.tab-nav-btn').forEach(el => {
     el.classList.toggle('active', el.dataset.tab === name);
   });
-  if (showTabId === 'jobs') loadJobs();
-  if (showTabId === 'studies') loadStudies();
-  if (showTabId === 'alerts') { loadNotifyConfig(); loadNotifySubscriptions(); }
+  if (name === 'jobs') loadJobs();
+  if (name === 'studies') loadStudies();
+  if (name === 'alerts') { loadNotifyConfig(); loadNotifySubscriptions(); }
+  if (name === 'settings') loadUsersAndGroups();
 }
 
 // ── Mode toggle ────────────────────────────────────────────────────────────
@@ -938,6 +1090,11 @@ function closeModal() {
   document.getElementById('inst-passphrase').value = '';
   document.getElementById('inst-pw').value = '';
   document.getElementById('inst-key-file').value = '';
+  document.getElementById('userModal').classList.remove('show');
+  document.getElementById('groupModal').classList.remove('show');
+  document.getElementById('membersModal').classList.remove('show');
+  document.getElementById('userModalInviteLink').classList.add('hidden');
+  document.getElementById('userModalBtn').onclick = submitUserModal;
 }
 function authTypeChange() {
   const v = document.getElementById('inst-auth').value;
@@ -1555,6 +1712,409 @@ function renderServicesFromMonitoring(services) {
   if (!html) html = '<div class="muted" style="font-size:.75rem">No data</div>';
   el.innerHTML = html;
   checkManualDiagnoseBtn();
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+async function checkAuth() {
+  try {
+    const res = await fetch('/api/auth/me');
+    if (res.ok) {
+      const data = await res.json();
+      currentUserRole = data.role;
+      const badge = document.getElementById('settingsUserBadge');
+      if (badge) badge.textContent = data.user?.name ? data.user.name + ' (' + data.role + ')' : data.role;
+      return true;
+    }
+    // 401 → show login
+    showLoginModal();
+    return false;
+  } catch {
+    return true; // network error, allow through (legacy mode)
+  }
+}
+
+function showLoginModal() {
+  document.getElementById('loginModal').style.display = 'grid';
+}
+
+async function submitLogin() {
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('loginError');
+  errEl.style.display = 'none';
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({email, password})
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error || 'Login failed'; errEl.style.display = ''; return; }
+    document.getElementById('loginModal').style.display = 'none';
+    currentUserRole = data.role;
+    // Re-bootstrap
+    setMode(currentMode);
+    loadInstances();
+    loadDashboard();
+    loadNotifyConfig();
+    loadNotifySubscriptions();
+    pollMonitoring();
+    initHoverNav();
+    initKeyboardShortcuts();
+  } catch { errEl.textContent = 'Network error'; errEl.style.display = ''; }
+}
+
+// Handle Enter key on login fields
+document.getElementById('login-password').addEventListener('keydown', e => {
+  if (e.key === 'Enter') submitLogin();
+});
+
+async function submitSetPassword() {
+  const token = document.getElementById('invite-token').value;
+  const password = document.getElementById('invite-password').value;
+  const confirm = document.getElementById('invite-confirm').value;
+  const errEl = document.getElementById('inviteError');
+  errEl.style.display = 'none';
+  if (password !== confirm) { errEl.textContent = 'Passwords do not match'; errEl.style.display = ''; return; }
+  if (password.length < 8) { errEl.textContent = 'Password must be at least 8 characters'; errEl.style.display = ''; return; }
+  try {
+    const res = await fetch('/api/auth/set_password', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({token, password})
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error || 'Error'; errEl.style.display = ''; return; }
+    document.getElementById('inviteModal').style.display = 'none';
+    // Redirect to root and re-bootstrap
+    window.history.replaceState(null, '', '/');
+    currentUserRole = null;
+    checkAuth().then(authed => {
+      if (!authed) return;
+      setMode(currentMode);
+      loadInstances();
+      loadDashboard();
+      loadNotifyConfig();
+      loadNotifySubscriptions();
+      pollMonitoring();
+      initHoverNav();
+      initKeyboardShortcuts();
+    });
+  } catch { errEl.textContent = 'Network error'; errEl.style.display = ''; }
+}
+
+// ── Users & access tab ────────────────────────────────────────────────────────
+function switchAccessTab(name) {
+  document.querySelectorAll('.access-subtab').forEach(b => b.classList.toggle('active', b.dataset.subtab === name));
+  ['users','groups'].forEach(t => {
+    const el = document.getElementById('subtab-' + t);
+    if (el) el.classList.toggle('hidden', t !== name);
+  });
+  if (name === 'groups') loadGroups();
+  else loadUsers();
+}
+
+async function loadUsersAndGroups() {
+  await loadRolesAndGroupsCache();
+  loadUsers();
+}
+
+async function loadRolesAndGroupsCache() {
+  try {
+    const [rRes, gRes] = await Promise.all([
+      fetch('/api/roles'),
+      fetch('/api/groups')
+    ]);
+    if (rRes.ok) rolesCache = (await rRes.json()).roles || [];
+    if (gRes.ok) groupsCache = (await gRes.json()).groups || [];
+  } catch {}
+}
+
+async function loadUsers() {
+  const tbody = document.getElementById('usersTableBody');
+  if (!tbody) return;
+  try {
+    const res = await fetch('/api/users');
+    if (!res.ok) {
+      tbody.innerHTML = `<tr><td colspan="6" class="muted" style="padding:12px">Access denied (Admin only)</td></tr>`;
+      return;
+    }
+    const data = await res.json();
+    const users = data.users || [];
+    if (!users.length) {
+      tbody.innerHTML = `<tr><td colspan="6" class="muted" style="padding:12px">No users yet. Click "+ Add user" to create the first one.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = users.map(u => {
+      const group = u.group_name ? esc(u.group_name) : '&mdash;';
+      const role = u.role_name ? esc(u.role_name) : (u.group_name ? '<span class="muted">via group</span>' : '&mdash;');
+      const statusCls = u.status === 'active' ? 'green-text' : (u.status === 'disabled' ? 'error-text' : '');
+      const statusLabel = u.status === 'active' ? 'Active' : u.status === 'invited' ? 'Invited' : 'Disabled';
+      return `<tr>
+        <td>${esc(u.name)}</td>
+        <td style="font-family:'JetBrains Mono',monospace;font-size:.79rem">${esc(u.email)}</td>
+        <td>${group}</td>
+        <td>${role}</td>
+        <td class="${statusCls}" style="font-size:.8rem">${statusLabel}</td>
+        <td style="text-align:right">
+          <div style="display:inline-flex;gap:4px">
+            <button class="btn-sm" onclick="showEditUserModal(${u.id})">Edit</button>
+            ${u.status !== 'disabled' ? `<button class="btn-sm" style="color:var(--red)" onclick="disableUser(${u.id})">Disable</button>` : ''}
+            ${u.status === 'invited' ? `<button class="btn-sm" onclick="resendInvite(${u.id})">Resend invite</button>` : ''}
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
+  } catch { tbody.innerHTML = `<tr><td colspan="6" class="muted" style="padding:12px">Error loading users</td></tr>`; }
+}
+
+async function loadGroups() {
+  const el = document.getElementById('groupsList');
+  if (!el) return;
+  try {
+    const res = await fetch('/api/groups');
+    if (!res.ok) { el.innerHTML = '<div class="muted" style="padding:12px">Access denied (Admin only)</div>'; return; }
+    const data = await res.json();
+    const groups = data.groups || [];
+    if (!groups.length) {
+      el.innerHTML = '<div class="muted" style="padding:12px">No groups yet. Click "+ Create group" to create one.</div>';
+      return;
+    }
+    el.innerHTML = groups.map(g => `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+        <div>
+          <div style="font-weight:600;font-size:.87rem">${esc(g.name)}</div>
+          <div class="muted" style="font-size:.76rem;margin-top:2px">${esc(g.role_name || '')} &bull; ${g.member_count} member${g.member_count !== 1 ? 's' : ''}</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn-sm" onclick="showManageMembersModal(${g.id},'${esc(g.name)}')">Manage</button>
+          <button class="btn-sm" onclick="showEditGroupModal(${g.id})">Edit</button>
+          <button class="btn-sm" style="color:var(--red)" onclick="deleteGroup(${g.id})">Delete</button>
+        </div>
+      </div>`).join('');
+  } catch { el.innerHTML = '<div class="muted" style="padding:12px">Error loading groups</div>'; }
+}
+
+// ── User Modal ────────────────────────────────────────────────────────────────
+function showAddUserModal() {
+  document.getElementById('userModalTitle').textContent = 'Add user';
+  document.getElementById('userModalId').value = '';
+  document.getElementById('um-name').value = '';
+  document.getElementById('um-email').value = '';
+  document.getElementById('um-assign-type').value = 'role';
+  document.getElementById('userModalBtn').textContent = 'Add user';
+  document.getElementById('userModalError').style.display = 'none';
+  document.getElementById('userModalInviteLink').classList.add('hidden');
+  populateRoleSelect('um-role-id');
+  populateGroupSelect('um-group-id');
+  umAssignTypeChange();
+  document.getElementById('userModal').classList.add('show');
+}
+
+async function showEditUserModal(userId) {
+  await loadRolesAndGroupsCache();
+  const res = await fetch('/api/users');
+  if (!res.ok) return;
+  const users = (await res.json()).users || [];
+  const u = users.find(x => x.id === userId);
+  if (!u) return;
+  document.getElementById('userModalTitle').textContent = 'Edit user';
+  document.getElementById('userModalId').value = userId;
+  document.getElementById('um-name').value = u.name;
+  document.getElementById('um-email').value = u.email;
+  document.getElementById('userModalBtn').textContent = 'Save changes';
+  document.getElementById('userModalError').style.display = 'none';
+  document.getElementById('userModalInviteLink').classList.add('hidden');
+  populateRoleSelect('um-role-id', u.role_id);
+  populateGroupSelect('um-group-id', u.group_id);
+  document.getElementById('um-assign-type').value = u.group_id ? 'group' : 'role';
+  umAssignTypeChange();
+  document.getElementById('userModal').classList.add('show');
+}
+
+function umAssignTypeChange() {
+  const t = document.getElementById('um-assign-type').value;
+  document.getElementById('um-role-row').classList.toggle('hidden', t !== 'role');
+  document.getElementById('um-group-row').classList.toggle('hidden', t !== 'group');
+}
+
+function populateRoleSelect(selectId, selectedId) {
+  const sel = document.getElementById(selectId);
+  sel.innerHTML = rolesCache.map(r =>
+    `<option value="${r.id}" ${r.id == selectedId ? 'selected' : ''}>${esc(r.name)}</option>`
+  ).join('');
+}
+
+function populateGroupSelect(selectId, selectedId) {
+  const sel = document.getElementById(selectId);
+  if (!groupsCache.length) {
+    sel.innerHTML = '<option value="">No groups yet</option>';
+    return;
+  }
+  sel.innerHTML = groupsCache.map(g =>
+    `<option value="${g.id}" ${g.id == selectedId ? 'selected' : ''}>${esc(g.name)} (${esc(g.role_name)})</option>`
+  ).join('');
+}
+
+async function submitUserModal() {
+  const userId = document.getElementById('userModalId').value;
+  const name = document.getElementById('um-name').value.trim();
+  const email = document.getElementById('um-email').value.trim();
+  const assignType = document.getElementById('um-assign-type').value;
+  const roleId = document.getElementById('um-role-id').value;
+  const groupId = document.getElementById('um-group-id').value;
+  const errEl = document.getElementById('userModalError');
+  errEl.style.display = 'none';
+
+  const payload = {name, email, assign_type: assignType};
+  if (assignType === 'role') payload.role_id = parseInt(roleId);
+  else payload.group_id = parseInt(groupId);
+
+  const isEdit = !!userId;
+  const url = isEdit ? `/api/users/${userId}` : '/api/users';
+  const method = isEdit ? 'PUT' : 'POST';
+
+  try {
+    const res = await fetch(url, {
+      method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error || 'Error'; errEl.style.display = ''; return; }
+    if (!isEdit && data.invite_url) {
+      document.getElementById('userModalInviteUrl').textContent = window.location.origin + data.invite_url;
+      document.getElementById('userModalInviteLink').classList.remove('hidden');
+      document.getElementById('userModalBtn').textContent = 'Done';
+      document.getElementById('userModalBtn').onclick = () => { closeModal(); loadUsers(); };
+    } else {
+      closeModal();
+      loadUsers();
+    }
+  } catch { errEl.textContent = 'Network error'; errEl.style.display = ''; }
+}
+
+async function disableUser(userId) {
+  if (!confirm('Disable this user?')) return;
+  await fetch(`/api/users/${userId}/disable`, {method:'POST'});
+  loadUsers();
+}
+
+async function resendInvite(userId) {
+  const res = await fetch(`/api/users/${userId}/resend_invite`, {method:'POST'});
+  const data = await res.json();
+  if (res.ok) {
+    alert('New invite link:\n' + window.location.origin + data.invite_url);
+  }
+}
+
+// ── Group Modal ────────────────────────────────────────────────────────────────
+function showCreateGroupModal() {
+  document.getElementById('groupModalTitle').textContent = 'Create group';
+  document.getElementById('groupModalId').value = '';
+  document.getElementById('gm-name').value = '';
+  document.getElementById('groupModalBtn').textContent = 'Create group';
+  document.getElementById('groupModalError').style.display = 'none';
+  populateRoleSelect('gm-role-id');
+  document.getElementById('groupModal').classList.add('show');
+}
+
+async function showEditGroupModal(groupId) {
+  await loadRolesAndGroupsCache();
+  const g = groupsCache.find(x => x.id === groupId);
+  if (!g) return;
+  document.getElementById('groupModalTitle').textContent = 'Edit group';
+  document.getElementById('groupModalId').value = groupId;
+  document.getElementById('gm-name').value = g.name;
+  document.getElementById('groupModalBtn').textContent = 'Save changes';
+  document.getElementById('groupModalError').style.display = 'none';
+  populateRoleSelect('gm-role-id', g.role_id);
+  document.getElementById('groupModal').classList.add('show');
+}
+
+async function submitGroupModal() {
+  const groupId = document.getElementById('groupModalId').value;
+  const name = document.getElementById('gm-name').value.trim();
+  const roleId = document.getElementById('gm-role-id').value;
+  const errEl = document.getElementById('groupModalError');
+  errEl.style.display = 'none';
+  if (!name) { errEl.textContent = 'Name is required'; errEl.style.display = ''; return; }
+
+  const isEdit = !!groupId;
+  const url = isEdit ? `/api/groups/${groupId}` : '/api/groups';
+  const method = isEdit ? 'PUT' : 'POST';
+  try {
+    const res = await fetch(url, {
+      method, headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name, role_id: parseInt(roleId)})
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error || 'Error'; errEl.style.display = ''; return; }
+    closeModal();
+    await loadRolesAndGroupsCache();
+    loadGroups();
+  } catch { errEl.textContent = 'Network error'; errEl.style.display = ''; }
+}
+
+async function deleteGroup(groupId) {
+  if (!confirm('Delete this group? Members will lose their group-based role.')) return;
+  await fetch(`/api/groups/${groupId}`, {method:'DELETE'});
+  await loadRolesAndGroupsCache();
+  loadGroups();
+}
+
+// ── Group Members Modal ────────────────────────────────────────────────────────
+async function showManageMembersModal(groupId, groupName) {
+  document.getElementById('membersGroupId').value = groupId;
+  document.getElementById('membersModalTitle').textContent = 'Members: ' + groupName;
+  document.getElementById('membersModal').classList.add('show');
+  await refreshMembersList(groupId);
+  // Populate add-member select with users not already in this group
+  await populateMemberAddSelect(groupId);
+}
+
+async function refreshMembersList(groupId) {
+  const el = document.getElementById('membersList');
+  const res = await fetch(`/api/groups/${groupId}/members`);
+  if (!res.ok) { el.innerHTML = '<div class="muted">Error loading members</div>'; return; }
+  const data = await res.json();
+  const members = data.members || [];
+  if (!members.length) { el.innerHTML = '<div class="muted" style="font-size:.82rem">No members yet</div>'; return; }
+  el.innerHTML = members.map(m => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)">
+      <div>
+        <span style="font-size:.87rem">${esc(m.name)}</span>
+        <span class="muted" style="font-size:.76rem;margin-left:8px">${esc(m.email)}</span>
+      </div>
+      <button class="btn-sm" style="color:var(--red)" onclick="removeMember(${groupId},${m.id})">Remove</button>
+    </div>`).join('');
+}
+
+async function populateMemberAddSelect(groupId) {
+  const sel = document.getElementById('memberAddSelect');
+  const [uRes, mRes] = await Promise.all([fetch('/api/users'), fetch(`/api/groups/${groupId}/members`)]);
+  const allUsers = uRes.ok ? ((await uRes.json()).users || []) : [];
+  const curMembers = mRes.ok ? ((await mRes.json()).members || []) : [];
+  const memberIds = new Set(curMembers.map(m => m.id));
+  const available = allUsers.filter(u => !memberIds.has(u.id) && u.status !== 'disabled');
+  if (!available.length) { sel.innerHTML = '<option value="">No users to add</option>'; return; }
+  sel.innerHTML = available.map(u => `<option value="${u.id}">${esc(u.name)} (${esc(u.email)})</option>`).join('');
+}
+
+async function addMemberToGroup() {
+  const groupId = document.getElementById('membersGroupId').value;
+  const userId = document.getElementById('memberAddSelect').value;
+  if (!userId) return;
+  await fetch(`/api/groups/${groupId}/members`, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({user_id: parseInt(userId)})
+  });
+  await refreshMembersList(groupId);
+  await populateMemberAddSelect(groupId);
+  await loadRolesAndGroupsCache();
+}
+
+async function removeMember(groupId, userId) {
+  await fetch(`/api/groups/${groupId}/members/${userId}`, {method:'DELETE'});
+  await refreshMembersList(groupId);
+  await populateMemberAddSelect(groupId);
 }
 </script>
 </body>

@@ -1,5 +1,6 @@
 import json
 import os
+import secrets
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -160,8 +161,41 @@ class Database:
                     notify_enabled INTEGER NOT NULL DEFAULT 0,
                     FOREIGN KEY(instance_id) REFERENCES instances(id) ON DELETE CASCADE
                 );
+
+                CREATE TABLE IF NOT EXISTS roles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE
+                );
+
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    email TEXT NOT NULL UNIQUE,
+                    password_hash TEXT,
+                    role_id INTEGER REFERENCES roles(id),
+                    invite_token TEXT,
+                    status TEXT NOT NULL DEFAULT 'invited'
+                        CHECK(status IN ('active','invited','disabled')),
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS groups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    role_id INTEGER NOT NULL REFERENCES roles(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS group_members (
+                    group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    PRIMARY KEY(group_id, user_id)
+                );
                 """
             )
+            # Seed the three fixed roles
+            conn.execute("INSERT OR IGNORE INTO roles (name) VALUES ('Admin')")
+            conn.execute("INSERT OR IGNORE INTO roles (name) VALUES ('Operator')")
+            conn.execute("INSERT OR IGNORE INTO roles (name) VALUES ('Viewer')")
 
     @staticmethod
     def _now() -> str:
@@ -641,3 +675,207 @@ class Database:
                 (renotify_minutes,),
             ).fetchall()
         return [self._row_to_dict(r) for r in rows]
+
+    # ── Roles ──────────────────────────────────────────────────────────────────
+
+    def list_roles(self) -> List[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute("SELECT * FROM roles ORDER BY id ASC").fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def get_role(self, role_id: int) -> Optional[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute("SELECT * FROM roles WHERE id=?", (role_id,)).fetchone()
+        return self._row_to_dict(row)
+
+    def get_role_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute("SELECT * FROM roles WHERE name=?", (name,)).fetchone()
+        return self._row_to_dict(row)
+
+    # ── Users ──────────────────────────────────────────────────────────────────
+
+    def count_users(self) -> int:
+        with self._lock, self._connect() as conn:
+            row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
+        return int(row[0])
+
+    def create_user(
+        self,
+        name: str,
+        email: str,
+        role_id: Optional[int] = None,
+    ) -> tuple:
+        """Create a new invited user. Returns (user_id, invite_token)."""
+        token = secrets.token_urlsafe(32)
+        now = self._now()
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO users (name, email, role_id, invite_token, status, created_at)
+                VALUES (?,?,?,?,?,?)
+                """,
+                (name, email, role_id, token, "invited", now),
+            )
+            return int(cur.lastrowid), token
+
+    def get_user(self, user_id: int) -> Optional[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        return self._row_to_dict(row)
+
+    def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM users WHERE email=?", (email,)
+            ).fetchone()
+        return self._row_to_dict(row)
+
+    def get_user_by_invite_token(self, token: str) -> Optional[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM users WHERE invite_token=?", (token,)
+            ).fetchone()
+        return self._row_to_dict(row)
+
+    def list_users(self) -> List[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    u.*,
+                    r.name AS role_name,
+                    (SELECT g.name FROM groups g
+                     JOIN group_members gm ON gm.group_id = g.id
+                     WHERE gm.user_id = u.id LIMIT 1) AS group_name,
+                    (SELECT g.id FROM groups g
+                     JOIN group_members gm ON gm.group_id = g.id
+                     WHERE gm.user_id = u.id LIMIT 1) AS group_id
+                FROM users u
+                LEFT JOIN roles r ON r.id = u.role_id
+                ORDER BY u.created_at ASC
+                """
+            ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def update_user(self, user_id: int, **fields: Any) -> None:
+        allowed = {"name", "email", "role_id", "status", "password_hash", "invite_token"}
+        fields = {k: v for k, v in fields.items() if k in allowed}
+        if not fields:
+            return
+        parts = ", ".join(f"{k}=?" for k in fields)
+        params = list(fields.values()) + [user_id]
+        with self._lock, self._connect() as conn:
+            conn.execute(f"UPDATE users SET {parts} WHERE id=?", params)
+
+    def set_user_password(self, user_id: int, password_hash: str) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE users SET password_hash=?, status='active', invite_token=NULL WHERE id=?",
+                (password_hash, user_id),
+            )
+
+    def regenerate_invite_token(self, user_id: int) -> str:
+        token = secrets.token_urlsafe(32)
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE users SET invite_token=?, status='invited', password_hash=NULL WHERE id=?",
+                (token, user_id),
+            )
+        return token
+
+    def get_user_groups(self, user_id: int) -> List[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT g.* FROM groups g
+                JOIN group_members gm ON gm.group_id = g.id
+                WHERE gm.user_id = ?
+                """,
+                (user_id,),
+            ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    # ── Groups ─────────────────────────────────────────────────────────────────
+
+    def create_group(self, name: str, role_id: int) -> int:
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO groups (name, role_id) VALUES (?,?)",
+                (name, role_id),
+            )
+            return int(cur.lastrowid)
+
+    def list_groups(self) -> List[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    g.*,
+                    r.name AS role_name,
+                    COUNT(gm.user_id) AS member_count
+                FROM groups g
+                LEFT JOIN roles r ON r.id = g.role_id
+                LEFT JOIN group_members gm ON gm.group_id = g.id
+                GROUP BY g.id
+                ORDER BY g.id ASC
+                """
+            ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def get_group(self, group_id: int) -> Optional[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT g.*, r.name AS role_name
+                FROM groups g
+                LEFT JOIN roles r ON r.id = g.role_id
+                WHERE g.id=?
+                """,
+                (group_id,),
+            ).fetchone()
+        return self._row_to_dict(row)
+
+    def update_group(self, group_id: int, **fields: Any) -> None:
+        allowed = {"name", "role_id"}
+        fields = {k: v for k, v in fields.items() if k in allowed}
+        if not fields:
+            return
+        parts = ", ".join(f"{k}=?" for k in fields)
+        params = list(fields.values()) + [group_id]
+        with self._lock, self._connect() as conn:
+            conn.execute(f"UPDATE groups SET {parts} WHERE id=?", params)
+
+    def delete_group(self, group_id: int) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute("DELETE FROM groups WHERE id=?", (group_id,))
+
+    def get_group_members(self, group_id: int) -> List[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT u.id, u.name, u.email, u.status
+                FROM users u
+                JOIN group_members gm ON gm.user_id = u.id
+                WHERE gm.group_id = ?
+                ORDER BY u.name ASC
+                """,
+                (group_id,),
+            ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def add_group_member(self, group_id: int, user_id: int) -> None:
+        """Add a user to a group and clear any direct role assignment."""
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?,?)",
+                (group_id, user_id),
+            )
+            conn.execute("UPDATE users SET role_id=NULL WHERE id=?", (user_id,))
+
+    def remove_group_member(self, group_id: int, user_id: int) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "DELETE FROM group_members WHERE group_id=? AND user_id=?",
+                (group_id, user_id),
+            )
