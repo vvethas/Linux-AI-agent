@@ -10,6 +10,10 @@ from .notify import Notifier
 from .ssh import SSHManager
 from .study import StudyRunner
 
+# Drift thresholds
+_DRIFT_WARN_PCT = 20.0   # warn if metric is >20 percentage points above rolling avg
+_DRIFT_CRIT_SVC = True   # critical alert whenever a monitored service goes failed
+
 
 class HealthScheduler:
     def __init__(
@@ -119,6 +123,95 @@ class HealthScheduler:
         thread = Thread(target=self.run_check, args=(instance_id,), daemon=True)
         thread.start()
 
+    # ── Drift / correlation helpers ───────────────────────────────────────────
+
+    def _check_metric_drift(self, instance_id: int, metric: str, current: float) -> None:
+        avg = self.db.get_metric_rolling_avg(instance_id, metric, n=10)
+        if avg is None:
+            return
+        diff = current - avg
+        alert_msg = f"{metric.upper()} usage at {current:.0f}% — {diff:+.0f}pp vs rolling avg ({avg:.0f}%)"
+        if diff >= _DRIFT_WARN_PCT:
+            existing = self.db.find_open_alert(instance_id, "warning", alert_msg)
+            if not existing:
+                self.db.create_alert(instance_id, "warning", alert_msg)
+        else:
+            self.db.resolve_alerts_for_condition(instance_id, "warning", alert_msg)
+
+    def _check_service_drift(self, instance_id: int, service_name: str, status: str) -> None:
+        alert_msg = f"Monitored service '{service_name}' is failed"
+        if status == "failed":
+            existing = self.db.find_open_alert(instance_id, "critical", alert_msg)
+            if not existing:
+                self.db.create_alert(instance_id, "critical", alert_msg)
+        else:
+            self.db.resolve_alerts_for_condition(instance_id, "critical", alert_msg)
+
+    def _generate_and_cache_insight(
+        self,
+        instance_id: int,
+        metrics: Dict[str, Optional[float]],
+        service_statuses: List[Dict[str, Any]],
+    ) -> None:
+        """Generate an AI correlation insight and cache it in the config table."""
+        # Only run if something is notable
+        failed_svcs = [s["service_name"] for s in service_statuses if s.get("status") == "failed"]
+        high_metrics = {k: v for k, v in metrics.items() if v is not None and v >= 80}
+        if not failed_svcs and not high_metrics:
+            return
+
+        # Build a short context summary
+        metric_lines = ", ".join(f"{k}={v:.0f}%" for k, v in high_metrics.items())
+        svc_lines = ", ".join(failed_svcs)
+        context_parts = []
+        if metric_lines:
+            context_parts.append(f"High metrics: {metric_lines}")
+        if svc_lines:
+            context_parts.append(f"Failed services: {svc_lines}")
+
+        # Fetch recent metric history for context
+        history_lines: List[str] = []
+        for metric in ("cpu", "mem", "disk"):
+            pts = self.db.get_metric_history(instance_id, metric, hours=4)
+            if pts:
+                vals = [f"{p['value']:.0f}" for p in pts[-6:]]
+                history_lines.append(f"{metric}: [{', '.join(vals)}]")
+
+        full_context = "; ".join(context_parts)
+        if history_lines:
+            full_context += " | Recent trend: " + "; ".join(history_lines)
+
+        try:
+            from .core import ClaudeClient
+            client = ClaudeClient()
+            if not client.api_key:
+                return
+            prompt = (
+                f"Briefly (1 sentence, ≤20 words) note any notable correlation "
+                f"or drift for this Linux instance: {full_context}. "
+                f"Be specific about what metric or service and why it matters."
+            )
+            result = client.call_json(
+                system_prompt=(
+                    "You are a Linux monitoring assistant. "
+                    "Respond with JSON: {{\"insight\": \"<one sentence>\"}}"
+                ),
+                user_message=prompt,
+            )
+            insight = result.get("insight", "")
+            if insight:
+                self.db.set_config_json(
+                    f"insight_{instance_id}",
+                    {
+                        "text": insight,
+                        "generated_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+        except Exception:
+            pass
+
+    # ── Main poll cycle ───────────────────────────────────────────────────────
+
     def run_check(self, instance_id: int) -> Dict[str, Any]:
         instance = self.db.get_instance(instance_id)
         if not instance:
@@ -137,6 +230,46 @@ class HealthScheduler:
         self.db.update_instance_status(instance_id, "online")
         self.notifier.resolve_instance_reachable(instance_id)
 
+        # ── Collect and persist quick metrics ────────────────────────────────
+        try:
+            metrics = self.ssh.collect_quick_metrics(instance)
+            for metric, value in metrics.items():
+                if value is not None:
+                    self.db.add_metric_history(instance_id, metric, value)
+                    self._check_metric_drift(instance_id, metric, value)
+        except Exception:
+            metrics: Dict[str, Optional[float]] = {}
+
+        # ── Poll monitored services ───────────────────────────────────────────
+        service_statuses: List[Dict[str, Any]] = []
+        try:
+            monitored = self.db.list_monitored_services(instance_id)
+            for svc in monitored:
+                svc_name = svc["service_name"]
+                try:
+                    res = self.ssh.execute(
+                        instance,
+                        f"systemctl is-active {svc_name} 2>/dev/null || echo failed",
+                        timeout=10,
+                        get_pty=False,
+                    )
+                    raw = res.get("stdout", "").strip().lower()
+                    status = "running" if raw == "active" else "failed"
+                except Exception:
+                    status = "failed"
+                self.db.add_service_status(instance_id, svc_name, status)
+                self._check_service_drift(instance_id, svc_name, status)
+                service_statuses.append({"service_name": svc_name, "status": status})
+        except Exception:
+            pass
+
+        # ── AI correlation insight ────────────────────────────────────────────
+        try:
+            self._generate_and_cache_insight(instance_id, metrics, service_statuses)
+        except Exception:
+            pass
+
+        # ── Study ─────────────────────────────────────────────────────────────
         try:
             result = self.study_runner.run(instance, note="scheduled health check")
         except Exception as exc:

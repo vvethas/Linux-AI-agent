@@ -644,6 +644,58 @@ def check_log(instance_id: int):
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
+def _disk_forecast(history: list) -> Optional[str]:
+    """Linear regression to estimate days until disk reaches 90%.
+
+    *history* is a list of dicts with keys ``value`` (float) and
+    ``recorded_at`` (ISO-8601 string), ordered oldest-first.
+    Returns a human-readable string like ``"~3d to 90%"`` or ``None``
+    if there is not enough data or the trend is flat/declining.
+    """
+    if len(history) < 2:
+        return None
+    n = len(history)
+    try:
+        # Use the position index as x; value as y
+        sx = sum(range(n))
+        sy = sum(p["value"] for p in history)
+        sxx = sum(i * i for i in range(n))
+        sxy = sum(i * history[i]["value"] for i in range(n))
+        denom = n * sxx - sx * sx
+        if denom == 0:
+            return None
+        slope = (n * sxy - sx * sy) / denom
+        if slope <= 0:
+            return None  # flat or declining
+        intercept = (sy - slope * sx) / n
+        # How many steps until we hit 90?
+        current = intercept + slope * (n - 1)
+        if current >= 90:
+            return None
+        steps_to_90 = (90 - intercept) / slope
+        remaining_steps = steps_to_90 - (n - 1)
+        if remaining_steps <= 0:
+            return None
+        # Estimate the step interval from timestamps
+        try:
+            from datetime import datetime as _dt
+            t0 = _dt.fromisoformat(history[0]["recorded_at"].replace("Z", "+00:00"))
+            t1 = _dt.fromisoformat(history[-1]["recorded_at"].replace("Z", "+00:00"))
+            elapsed_hours = (t1 - t0).total_seconds() / 3600
+            step_hours = elapsed_hours / (n - 1) if n > 1 else 6
+        except Exception:
+            step_hours = 6
+        remaining_hours = remaining_steps * step_hours
+        days = remaining_hours / 24
+        if days > 365:
+            return None
+        if days < 1:
+            return "<1d to 90%"
+        return f"~{int(days)}d to 90%"
+    except Exception:
+        return None
+
+
 @app.route("/api/dashboard", methods=["GET"])
 @require_permission("view")
 def dashboard():
@@ -664,12 +716,42 @@ def dashboard():
         score = int((report.get("summary") or {}).get("health_score", 0) or 0)
         if score:
             scores.append(score)
+
+        iid = inst["id"]
+
+        # Sparklines: last 24h of data for cpu, mem, disk
+        sparklines: Dict[str, Any] = {}
+        for metric in ("cpu", "mem", "disk"):
+            pts = db.get_metric_history(iid, metric, hours=24)
+            sparklines[metric] = [
+                {"value": p["value"], "ts": p["recorded_at"]} for p in pts
+            ]
+
+        # Disk forecast using regression over stored disk history
+        disk_forecast = _disk_forecast(
+            [{"value": p["value"], "recorded_at": p["ts"]} for p in sparklines["disk"]]
+        )
+
+        # Service chips: latest status per monitored service
+        service_chips = [
+            {"name": s["service_name"], "status": s["status"]}
+            for s in db.get_latest_service_statuses(iid)
+        ]
+
+        # Cached AI insight (generated during poll, only if notable)
+        insight_cfg = db.get_config_json(f"insight_{iid}", default={})
+        ai_insight = insight_cfg.get("text") or None
+
         tiles.append({
             "instance": inst,
             "health_score": score,
             "role": (report.get("summary") or {}).get("role", "unknown"),
             "last_check": inst.get("last_seen"),
-            "schedule": db.get_schedule(inst["id"]),
+            "schedule": db.get_schedule(iid),
+            "sparklines": sparklines,
+            "disk_forecast": disk_forecast,
+            "service_chips": service_chips,
+            "ai_insight": ai_insight,
         })
 
     online = sum(1 for i in instances if i.get("last_status") == "online")
@@ -690,7 +772,175 @@ def dashboard():
     })
 
 
-# ── Chat / classify ───────────────────────────────────────────────────────────
+# ── Monitoring (lightweight cached metrics for sidebar/polling) ───────────────
+
+@app.route("/api/monitoring", methods=["GET"])
+@require_permission("view")
+def monitoring():
+    """Return the most recent metric snapshot for every instance (DB-only, no SSH)."""
+    instances = db.list_instances()
+    result = []
+    for inst in instances:
+        iid = inst["id"]
+        m = db.get_latest_metrics(iid)
+        latest_svcs = db.get_latest_service_statuses(iid)
+        result.append({
+            "id": iid,
+            "reachable": inst.get("last_status") == "online",
+            "cpu_pct": m.get("cpu"),
+            "mem_pct": m.get("mem"),
+            "disk_pct": m.get("disk"),
+            "services": [
+                {"name": s["service_name"], "status": s["status"]}
+                for s in latest_svcs
+            ],
+        })
+    return jsonify({"instances": result})
+
+
+# ── Metric history ────────────────────────────────────────────────────────────
+
+@app.route("/api/instances/<int:instance_id>/metrics_history", methods=["GET"])
+@require_permission("view")
+def instance_metrics_history(instance_id: int):
+    if not db.get_instance(instance_id):
+        return _err("instance not found", 404)
+    hours = int(request.args.get("hours", 24))
+    metric = request.args.get("metric") or None
+    rows = db.get_metric_history(instance_id, metric_name=metric, hours=hours)
+    return jsonify({"history": rows})
+
+
+# ── Monitored services CRUD ───────────────────────────────────────────────────
+
+@app.route("/api/instances/<int:instance_id>/monitored_services", methods=["GET"])
+@require_permission("view")
+def list_monitored_services(instance_id: int):
+    if not db.get_instance(instance_id):
+        return _err("instance not found", 404)
+    return jsonify({"services": db.list_monitored_services(instance_id)})
+
+
+@app.route("/api/instances/<int:instance_id>/monitored_services", methods=["POST"])
+@require_permission("manage_instances")
+def add_monitored_service(instance_id: int):
+    if not db.get_instance(instance_id):
+        return _err("instance not found", 404)
+    payload = request.get_json(force=True) or {}
+    service_name = str(payload.get("service_name", "")).strip()
+    if not service_name:
+        return _err("service_name is required")
+    sid = db.add_monitored_service(instance_id, service_name)
+    return jsonify({"service": {"id": sid, "instance_id": instance_id, "service_name": service_name}}), 201
+
+
+@app.route("/api/instances/<int:instance_id>/monitored_services/<int:service_id>", methods=["DELETE"])
+@require_permission("manage_instances")
+def remove_monitored_service(instance_id: int, service_id: int):
+    if not db.get_instance(instance_id):
+        return _err("instance not found", 404)
+    db.remove_monitored_service(service_id, instance_id)
+    return jsonify({"ok": True})
+
+
+# ── Service status drill-down ─────────────────────────────────────────────────
+
+@app.route("/api/instances/<int:instance_id>/service_history", methods=["GET"])
+@require_permission("view")
+def service_history(instance_id: int):
+    if not db.get_instance(instance_id):
+        return _err("instance not found", 404)
+    service_name = request.args.get("service") or None
+    period = request.args.get("period", "24h")
+    period_map = {"1h": 1, "24h": 24, "7d": 168, "30d": 720}
+    hours = period_map.get(period, 24)
+
+    rows = db.get_service_status_history(instance_id, service_name=service_name, hours=hours)
+    if not rows:
+        return jsonify({
+            "rows": [],
+            "uptime_pct": None,
+            "restart_count": 0,
+            "longest_outage_sec": 0,
+            "transitions": [],
+        })
+
+    # Compute summary stats
+    total = len(rows)
+    running_count = sum(1 for r in rows if r["status"] == "running")
+    uptime_pct = round(running_count / total * 100, 1) if total else None
+
+    # Restart count = number of failed→running transitions
+    restart_count = 0
+    transitions = []
+    prev_status = None
+    prev_ts = None
+    outage_start = None
+    outages = []
+    for r in rows:
+        st = r["status"]
+        ts = r["recorded_at"]
+        if prev_status is not None and st != prev_status:
+            transitions.append({"from": prev_status, "to": st, "at": ts})
+            if st == "running" and prev_status == "failed":
+                restart_count += 1
+                if outage_start is not None:
+                    try:
+                        from datetime import datetime as _dt
+                        t0 = _dt.fromisoformat(outage_start.replace("Z", "+00:00"))
+                        t1 = _dt.fromisoformat(ts.replace("Z", "+00:00"))
+                        outages.append(int((t1 - t0).total_seconds()))
+                    except Exception:
+                        pass
+                    outage_start = None
+            elif st == "failed" and prev_status == "running":
+                outage_start = ts
+        prev_status = st
+        prev_ts = ts
+
+    # If still in failed state at end
+    if prev_status == "failed" and outage_start is not None:
+        import datetime as _dt_mod
+        try:
+            t0 = _dt_mod.datetime.fromisoformat(outage_start.replace("Z", "+00:00"))
+            t1 = _dt_mod.datetime.now(_dt_mod.timezone.utc)
+            outages.append(int((t1 - t0).total_seconds()))
+        except Exception:
+            pass
+
+    longest_outage_sec = max(outages) if outages else 0
+
+    return jsonify({
+        "rows": rows,
+        "uptime_pct": uptime_pct,
+        "restart_count": restart_count,
+        "longest_outage_sec": longest_outage_sec,
+        "transitions": transitions,
+    })
+
+
+
+
+# ── Metric context for chat ───────────────────────────────────────────────────
+
+@app.route("/api/instances/<int:instance_id>/metrics_context", methods=["GET"])
+@require_permission("view")
+def metrics_context(instance_id: int):
+    """Return a compact text summary of recent metric+service history for chat injection."""
+    if not db.get_instance(instance_id):
+        return _err("instance not found", 404)
+    lines = []
+    for metric in ("cpu", "mem", "disk"):
+        pts = db.get_metric_history(instance_id, metric, hours=24)
+        if pts:
+            vals = [f"{p['value']:.0f}" for p in pts[-8:]]
+            lines.append(f"{metric.upper()} last 24h (%): {', '.join(vals)}")
+    svc_rows = db.get_latest_service_statuses(instance_id)
+    if svc_rows:
+        svc_summary = ", ".join(f"{s['service_name']}={s['status']}" for s in svc_rows)
+        lines.append(f"Monitored services: {svc_summary}")
+    return jsonify({"context": "\n".join(lines)})
+
 
 @app.route("/api/classify", methods=["POST"])
 @require_permission("run_diagnostics")

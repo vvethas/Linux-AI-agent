@@ -196,6 +196,33 @@ class Database:
                     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     PRIMARY KEY(group_id, user_id)
                 );
+
+                CREATE TABLE IF NOT EXISTS metric_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    instance_id INTEGER NOT NULL,
+                    metric_name TEXT NOT NULL CHECK(metric_name IN ('cpu','mem','disk')),
+                    value REAL NOT NULL,
+                    recorded_at TEXT NOT NULL,
+                    FOREIGN KEY(instance_id) REFERENCES instances(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS monitored_services (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    instance_id INTEGER NOT NULL,
+                    service_name TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(instance_id) REFERENCES instances(id) ON DELETE CASCADE,
+                    UNIQUE(instance_id, service_name)
+                );
+
+                CREATE TABLE IF NOT EXISTS service_status_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    instance_id INTEGER NOT NULL,
+                    service_name TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('running','failed')),
+                    recorded_at TEXT NOT NULL,
+                    FOREIGN KEY(instance_id) REFERENCES instances(id) ON DELETE CASCADE
+                );
                 """
             )
             # Seed the three fixed roles
@@ -953,3 +980,154 @@ class Database:
                 "DELETE FROM group_members WHERE group_id=? AND user_id=?",
                 (group_id, user_id),
             )
+
+    # ── Metric history ─────────────────────────────────────────────────────────
+
+    def add_metric_history(
+        self, instance_id: int, metric_name: str, value: float
+    ) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "INSERT INTO metric_history (instance_id, metric_name, value, recorded_at)"
+                " VALUES (?,?,?,?)",
+                (instance_id, metric_name, value, self._now()),
+            )
+
+    def get_metric_history(
+        self,
+        instance_id: int,
+        metric_name: Optional[str] = None,
+        hours: int = 24,
+    ) -> List[Dict[str, Any]]:
+        query = (
+            "SELECT * FROM metric_history"
+            " WHERE instance_id=?"
+            "   AND datetime(recorded_at) >= datetime('now',?)"
+        )
+        params: List[Any] = [instance_id, f"-{hours} hours"]
+        if metric_name:
+            query += " AND metric_name=?"
+            params.append(metric_name)
+        query += " ORDER BY recorded_at ASC"
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def get_latest_metrics(self, instance_id: int) -> Dict[str, Optional[float]]:
+        """Return the most recent value for each of cpu, mem, disk."""
+        result: Dict[str, Optional[float]] = {"cpu": None, "mem": None, "disk": None}
+        with self._lock, self._connect() as conn:
+            for metric in ("cpu", "mem", "disk"):
+                row = conn.execute(
+                    "SELECT value FROM metric_history"
+                    " WHERE instance_id=? AND metric_name=?"
+                    " ORDER BY id DESC LIMIT 1",
+                    (instance_id, metric),
+                ).fetchone()
+                if row:
+                    result[metric] = row[0]
+        return result
+
+    def get_metric_rolling_avg(
+        self, instance_id: int, metric_name: str, n: int = 10
+    ) -> Optional[float]:
+        """Return the rolling average of the last *n* values for a metric."""
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT value FROM metric_history"
+                " WHERE instance_id=? AND metric_name=?"
+                " ORDER BY id DESC LIMIT ?",
+                (instance_id, metric_name, n),
+            ).fetchall()
+        if not rows:
+            return None
+        return sum(r[0] for r in rows) / len(rows)
+
+    # ── Monitored services ─────────────────────────────────────────────────────
+
+    def add_monitored_service(self, instance_id: int, service_name: str) -> int:
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO monitored_services"
+                " (instance_id, service_name, created_at) VALUES (?,?,?)",
+                (instance_id, service_name.strip(), self._now()),
+            )
+            if cur.lastrowid:
+                return int(cur.lastrowid)
+            row = conn.execute(
+                "SELECT id FROM monitored_services"
+                " WHERE instance_id=? AND service_name=?",
+                (instance_id, service_name.strip()),
+            ).fetchone()
+            return int(row[0]) if row else 0
+
+    def remove_monitored_service(self, service_id: int, instance_id: int) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "DELETE FROM monitored_services WHERE id=? AND instance_id=?",
+                (service_id, instance_id),
+            )
+
+    def list_monitored_services(self, instance_id: int) -> List[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM monitored_services WHERE instance_id=?"
+                " ORDER BY service_name ASC",
+                (instance_id,),
+            ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    # ── Service status history ─────────────────────────────────────────────────
+
+    def add_service_status(
+        self, instance_id: int, service_name: str, status: str
+    ) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "INSERT INTO service_status_history"
+                " (instance_id, service_name, status, recorded_at)"
+                " VALUES (?,?,?,?)",
+                (instance_id, service_name, status, self._now()),
+            )
+
+    def get_service_status_history(
+        self,
+        instance_id: int,
+        service_name: Optional[str] = None,
+        hours: int = 24,
+    ) -> List[Dict[str, Any]]:
+        query = (
+            "SELECT * FROM service_status_history"
+            " WHERE instance_id=?"
+            "   AND datetime(recorded_at) >= datetime('now',?)"
+        )
+        params: List[Any] = [instance_id, f"-{hours} hours"]
+        if service_name:
+            query += " AND service_name=?"
+            params.append(service_name)
+        query += " ORDER BY recorded_at ASC"
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def get_latest_service_statuses(
+        self, instance_id: int
+    ) -> List[Dict[str, Any]]:
+        """Return the most recent status row for each monitored service."""
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT s.id, s.instance_id, s.service_name, s.status, s.recorded_at
+                FROM service_status_history s
+                INNER JOIN (
+                    SELECT service_name, MAX(id) AS max_id
+                    FROM service_status_history
+                    WHERE instance_id=?
+                    GROUP BY service_name
+                ) latest ON s.service_name = latest.service_name
+                           AND s.id = latest.max_id
+                ORDER BY s.service_name ASC
+                """,
+                (instance_id,),
+            ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
