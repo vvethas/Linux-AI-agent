@@ -195,6 +195,28 @@ table.jobs-table{width:100%;border-collapse:collapse;font-size:.83rem}
 @media(max-width:700px){.settings-grid{grid-template-columns:1fr}}
 .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)}
 .toggle-row label{font-size:.85rem}
+.instance-checklist{margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
+.instance-check-head{display:flex;justify-content:space-between;align-items:center;font-size:.78rem;color:var(--text-sec);margin-bottom:8px}
+.instance-check-item{display:flex;align-items:flex-start;gap:8px;padding:5px 0;border-bottom:1px solid rgba(30,45,61,.4)}
+.instance-check-item:last-child{border-bottom:none}
+.instance-check-item input[type="checkbox"]{width:auto;margin-top:2px}
+.severity-cards{display:grid;grid-template-columns:1fr;gap:10px}
+.severity-card{border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:10px}
+.severity-card h4{font-size:.85rem;margin-bottom:8px}
+.severity-card.critical h4{color:var(--red)}
+.severity-card.warning h4{color:var(--amber)}
+.severity-card.info h4{color:var(--accent)}
+.severity-route{display:flex;gap:14px;margin-bottom:8px;font-size:.82rem}
+.severity-route label{display:flex;gap:6px;align-items:center}
+.severity-route input[type="checkbox"]{width:auto}
+.severity-badge{display:inline-block;padding:2px 7px;border-radius:999px;font-size:.7rem;font-weight:600;border:1px solid}
+.severity-badge.critical{color:var(--red);border-color:var(--red)}
+.severity-badge.warning{color:var(--amber);border-color:var(--amber)}
+.severity-badge.info{color:var(--accent);border-color:var(--accent)}
+.alert-item{padding:10px 0;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.alert-item:last-child{border-bottom:none}
+.alert-meta{font-size:.75rem;color:var(--text-sec);margin-top:3px}
+.ack-badge{font-size:.72rem;color:var(--green);border:1px solid var(--green);border-radius:999px;padding:2px 8px}
 .toggle{position:relative;width:36px;height:20px;flex-shrink:0}
 .toggle input{opacity:0;width:0;height:0;position:absolute}
 .toggle-slider{position:absolute;inset:0;background:var(--muted);border-radius:20px;transition:.2s;cursor:pointer}
@@ -304,6 +326,10 @@ table.jobs-table{width:100%;border-collapse:collapse;font-size:.83rem}
             <h2>Recent Activity</h2>
             <div id="activityFeed"></div>
           </div>
+          <div class="panel">
+            <h2>Active Alerts</h2>
+            <div id="activeAlertsPanel"></div>
+          </div>
         </div>
 
         <!-- Chat tab -->
@@ -372,11 +398,39 @@ table.jobs-table{width:100%;border-collapse:collapse;font-size:.83rem}
               <div>
                 <div class="form-row"><label>Slack Webhook URL</label><input id="cfg-slack_webhook" type="text" placeholder="https://hooks.slack.com/&#8230;"></div>
                 <div class="toggle-row"><label>Enable Notifications</label><label class="toggle"><input type="checkbox" id="cfg-enabled"><span class="toggle-slider"></span></label></div>
-                <div class="toggle-row"><label>Notify All Studies</label><label class="toggle"><input type="checkbox" id="cfg-notify_all_studies"><span class="toggle-slider"></span></label></div>
-                <div class="toggle-row"><label>Notify Job Completions</label><label class="toggle"><input type="checkbox" id="cfg-notify_jobs" checked><span class="toggle-slider"></span></label></div>
-                <div class="toggle-row"><label>Notify Unreachable</label><label class="toggle"><input type="checkbox" id="cfg-notify_unreachable" checked><span class="toggle-slider"></span></label></div>
-                <div class="toggle-row"><label>Alert on Failed Services</label><label class="toggle"><input type="checkbox" id="cfg-alert_on_failed_services" checked><span class="toggle-slider"></span></label></div>
-                <div class="form-row" style="margin-top:12px"><label>Alert if Health Score Below</label><input id="cfg-alert_score_below" type="number" value="70" style="width:80px"></div>
+                <div class="toggle-row"><label>Notify for all instances</label><label class="toggle"><input type="checkbox" id="cfg-notify_all_instances" checked onchange="toggleSubscriptionChecklist()"><span class="toggle-slider"></span></label></div>
+                <div class="instance-checklist hidden" id="instanceSubscriptionChecklist">
+                  <div class="instance-check-head">
+                    <span>Choose instances</span>
+                    <a href="#" onclick="selectAllSubscriptions(event)">select all</a>
+                  </div>
+                  <div id="instanceSubscriptionList"></div>
+                </div>
+                <div class="severity-cards" style="margin-top:12px">
+                  <div class="severity-card critical">
+                    <h4>Critical</h4>
+                    <div class="severity-route">
+                      <label><input id="cfg-critical_slack" type="checkbox" checked> Slack</label>
+                      <label><input id="cfg-critical_email" type="checkbox" checked> Email</label>
+                    </div>
+                    <div class="form-row"><label>Renotify every N minutes until acknowledged</label><input id="cfg-critical_renotify_minutes" type="number" value="5" min="1" style="width:90px"></div>
+                  </div>
+                  <div class="severity-card warning">
+                    <h4>Warning</h4>
+                    <div class="severity-route">
+                      <label><input id="cfg-warning_slack" type="checkbox" checked> Slack</label>
+                      <label><input id="cfg-warning_email" type="checkbox" checked> Email</label>
+                    </div>
+                    <div class="form-row"><label>Alert if health score below</label><input id="cfg-warning_health_score_below" type="number" value="70" min="1" max="100" style="width:90px"></div>
+                  </div>
+                  <div class="severity-card info">
+                    <h4>Info</h4>
+                    <div class="severity-route">
+                      <label><input id="cfg-info_slack" type="checkbox" checked> Slack</label>
+                      <label><input id="cfg-info_email" type="checkbox" checked> Email</label>
+                    </div>
+                  </div>
+                </div>
               </div>
               <div>
                 <div class="form-row"><label>SMTP Host</label><input id="cfg-smtp_host" type="text" placeholder="smtp.gmail.com"></div>
@@ -506,6 +560,7 @@ let currentMode = localStorage.getItem('ai_mode') || 'manual';
 let currentTab = 'dashboard';
 let monitoringData = {};
 let _evtSource = null;
+let alertSubscriptions = new Set();
 
 // ── Bootstrap ───────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
@@ -513,6 +568,7 @@ window.addEventListener('DOMContentLoaded', () => {
   loadInstances();
   loadDashboard();
   loadNotifyConfig();
+  loadNotifySubscriptions();
   pollMonitoring();
   setInterval(loadInstances, 30000);
   setInterval(pollMonitoring, 30000);
@@ -546,6 +602,7 @@ function switchTab(name) {
   });
   if (showTabId === 'jobs') loadJobs();
   if (showTabId === 'studies') loadStudies();
+  if (showTabId === 'alerts') { loadNotifyConfig(); loadNotifySubscriptions(); }
 }
 
 // ── Mode toggle ────────────────────────────────────────────────────────────
@@ -600,6 +657,7 @@ async function loadInstances() {
   instances = res.instances || [];
   renderSidebar();
   populateInstanceSelects();
+  buildSubscriptionChecklist();
 }
 
 function renderSidebar() {
@@ -828,6 +886,47 @@ async function loadDashboard() {
       <span class="status-badge ${j.status}">${j.status}</span>
       <span class="muted">${fmtDate(j.started_at)}</span>
     </div>`).join('');
+  renderActiveAlerts(d.active_alerts || []);
+}
+
+function renderActiveAlerts(alerts) {
+  const el = document.getElementById('activeAlertsPanel');
+  if (!alerts.length) {
+    el.innerHTML = '<div class="muted">No active alerts.</div>';
+    return;
+  }
+  el.innerHTML = alerts.map(a => {
+    let tags = [];
+    if (Array.isArray(a.instance_tags)) tags = a.instance_tags;
+    else if (typeof a.instance_tags === 'string') { try { tags = JSON.parse(a.instance_tags || '[]'); } catch { tags = []; } }
+    const tagsText = tags.length ? ` &bull; tags: ${tags.map(t => esc(t)).join(', ')}` : '';
+    const ackMeta = a.acknowledged_at
+      ? `<span class=\"ack-badge\">Acknowledged by ${esc(a.acknowledged_by || 'unknown')} @ ${fmtDate(a.acknowledged_at)}</span>`
+      : '<span class=\"ack-badge\">Acknowledged</span>';
+    const action = a.status === 'active'
+      ? `<button class=\"btn-secondary\" style=\"padding:4px 10px;font-size:.76rem\" onclick=\"acknowledgeAlert(${a.id})\">Acknowledge</button>`
+      : ackMeta;
+    return `<div class=\"alert-item\">
+      <div style=\"flex:1\">
+        <div style=\"display:flex;gap:8px;align-items:center\">
+          <span class=\"severity-badge ${esc(a.severity)}\">${esc(a.severity)}</span>
+          <b>${esc(a.instance_label || ('Instance ' + a.instance_id))}</b>
+        </div>
+        <div style=\"margin-top:4px\">${esc(a.message || '')}</div>
+        <div class=\"alert-meta\">First seen: ${fmtDate(a.first_seen)}${tagsText}</div>
+      </div>
+      <div>${action}</div>
+    </div>`;
+  }).join('');
+}
+
+async function acknowledgeAlert(alertId) {
+  await fetch(`/api/alerts/${alertId}/acknowledge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ acknowledged_by: 'dashboard-user' })
+  });
+  loadDashboard();
 }
 
 // ── Add Instance Modal ────────────────────────────────────────────────────────
@@ -1181,19 +1280,41 @@ async function deleteStudy(id) { if (!confirm('Delete study report?')) return; a
 async function loadNotifyConfig() {
   const data = await fetch('/api/notifications/config').then(r => r.json());
   const cfg = data.config || {};
-  const boolKeys = ['enabled','notify_all_studies','notify_jobs','notify_unreachable','alert_on_failed_services','smtp_tls'];
+  const boolKeys = [
+    'enabled',
+    'notify_all_instances',
+    'critical_slack',
+    'critical_email',
+    'warning_slack',
+    'warning_email',
+    'info_slack',
+    'info_email',
+    'smtp_tls'
+  ];
   for (const [k, v] of Object.entries(cfg)) {
     const el = document.getElementById('cfg-' + k); if (!el) continue;
     if (boolKeys.includes(k)) el.checked = !!v; else el.value = v ?? '';
   }
+  toggleSubscriptionChecklist();
 }
 async function saveNotifyConfig() {
   const cfg = {};
-  const boolKeys = ['enabled','notify_all_studies','notify_jobs','notify_unreachable','alert_on_failed_services','smtp_tls'];
+  const boolKeys = [
+    'enabled',
+    'notify_all_instances',
+    'critical_slack',
+    'critical_email',
+    'warning_slack',
+    'warning_email',
+    'info_slack',
+    'info_email',
+    'smtp_tls'
+  ];
   ['slack_webhook','smtp_host','smtp_user','smtp_pass','email_from','email_to'].forEach(k => { cfg[k] = document.getElementById('cfg-' + k)?.value || ''; });
-  ['smtp_port','alert_score_below'].forEach(k => { cfg[k] = parseInt(document.getElementById('cfg-' + k)?.value) || 0; });
+  ['smtp_port','warning_health_score_below','critical_renotify_minutes'].forEach(k => { cfg[k] = parseInt(document.getElementById('cfg-' + k)?.value) || 0; });
   boolKeys.forEach(k => { cfg[k] = document.getElementById('cfg-' + k)?.checked ?? false; });
   await fetch('/api/notifications/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+  await saveNotifySubscriptions();
   document.getElementById('notifyResult').innerHTML = '<span class="green-text">&#10004; Saved</span>';
   setTimeout(() => { document.getElementById('notifyResult').textContent = ''; }, 2000);
 }
@@ -1201,6 +1322,49 @@ async function testNotify() {
   const res = await fetch('/api/notifications/test', { method: 'POST' }).then(r => r.json());
   const el = document.getElementById('notifyResult');
   el.innerHTML = res.sent ? '<span class="green-text">&#10004; Test sent</span>' : `<span class="error-text">Not sent: ${esc(res.slack_error || res.email_error || res.reason || '?')}</span>`;
+}
+
+function toggleSubscriptionChecklist() {
+  const allOn = document.getElementById('cfg-notify_all_instances')?.checked;
+  document.getElementById('instanceSubscriptionChecklist')?.classList.toggle('hidden', !!allOn);
+}
+
+function buildSubscriptionChecklist() {
+  const list = document.getElementById('instanceSubscriptionList');
+  if (!list) return;
+  if (!instances.length) {
+    list.innerHTML = '<div class="muted">No instances yet.</div>';
+    return;
+  }
+  list.innerHTML = instances.map(i => {
+    const tags = Array.isArray(i.tags) && i.tags.length ? ` (${i.tags.map(t => esc(t)).join(', ')})` : '';
+    return `<label class="instance-check-item">
+      <input type="checkbox" data-sub-instance="${i.id}" ${alertSubscriptions.has(i.id) ? 'checked' : ''}>
+      <span>${esc(i.label)}${tags}</span>
+    </label>`;
+  }).join('');
+}
+
+async function loadNotifySubscriptions() {
+  const data = await fetch('/api/notifications/subscriptions').then(r => r.json());
+  const rows = data.subscriptions || [];
+  alertSubscriptions = new Set(rows.filter(r => r.notify_enabled).map(r => parseInt(r.instance_id)));
+  buildSubscriptionChecklist();
+}
+
+async function saveNotifySubscriptions() {
+  const ids = Array.from(document.querySelectorAll('input[data-sub-instance]:checked')).map(el => parseInt(el.dataset.subInstance));
+  await fetch('/api/notifications/subscriptions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ instance_ids: ids })
+  });
+  alertSubscriptions = new Set(ids);
+}
+
+function selectAllSubscriptions(e) {
+  if (e) e.preventDefault();
+  document.querySelectorAll('input[data-sub-instance]').forEach(el => { el.checked = true; });
 }
 
 // ── Schedule ──────────────────────────────────────────────────────────────────

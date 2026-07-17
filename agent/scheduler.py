@@ -30,10 +30,21 @@ class HealthScheduler:
     def _job_id(instance_id: int) -> str:
         return f"health_check_{instance_id}"
 
+    @staticmethod
+    def _critical_renotify_job_id() -> str:
+        return "critical_alert_renotify"
+
     def start(self) -> None:
         if not self._started:
             self.scheduler.start()
             self._started = True
+            self.scheduler.add_job(
+                self.notifier.process_critical_renotifications,
+                "interval",
+                minutes=1,
+                id=self._critical_renotify_job_id(),
+                replace_existing=True,
+            )
         self.reload_from_db()
 
     def shutdown(self) -> None:
@@ -124,6 +135,7 @@ class HealthScheduler:
             return {"ok": False, "error": reason}
 
         self.db.update_instance_status(instance_id, "online")
+        self.notifier.resolve_instance_reachable(instance_id)
 
         try:
             result = self.study_runner.run(instance, note="scheduled health check")
