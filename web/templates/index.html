@@ -239,8 +239,49 @@ table.jobs-table{width:100%;border-collapse:collapse;font-size:.83rem}
 .btn-danger:hover{background:var(--red);color:#fff}
 .btn-approve{background:rgba(63,185,80,.1);color:var(--green);border:1px solid var(--green);padding:7px 14px;border-radius:7px;font-size:.85rem}
 .btn-approve:hover{background:var(--green);color:#000}
-/* ── Utility ── */
-.hidden{display:none!important}
+/* ── Sparklines ── */
+.sparkline-row{display:flex;gap:8px;margin:8px 0 4px}
+.sparkline-wrap{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px}
+.sparkline-label{font-size:.6rem;color:var(--text-sec);text-transform:uppercase;letter-spacing:.04em}
+.sparkline-svg{width:100%;height:28px}
+/* ── Service chips ── */
+.svc-chips{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0}
+.svc-chip{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:999px;font-size:.68rem;font-weight:600;cursor:pointer;border:1px solid transparent}
+.svc-chip.running{background:#1a3a2a;color:var(--green);border-color:#2a5a3a}
+.svc-chip.failed{background:#3d1a1a;color:var(--red);border-color:#6d2a2a}
+.svc-chip.running:hover{opacity:.8}
+.svc-chip.failed:hover{opacity:.8}
+/* ── Disk forecast badge ── */
+.forecast-badge{display:inline-block;background:#2d2208;color:var(--amber);font-size:.68rem;font-weight:600;padding:2px 7px;border-radius:999px;margin-left:6px}
+/* ── AI insight ── */
+.tile-insight{font-size:.72rem;color:var(--amber);background:rgba(210,153,34,.08);border:1px solid rgba(210,153,34,.2);border-radius:5px;padding:5px 8px;margin-top:2px;line-height:1.4}
+.tile-insight::before{content:"✦ ";opacity:.7}
+/* ── Monitored services panel ── */
+.svc-mgmt{margin-top:10px;padding:10px 0;border-top:1px solid var(--border)}
+.svc-mgmt h3{font-size:.78rem;color:var(--text-sec);margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.svc-quick-btns{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}
+.svc-quick-btn{background:var(--surface);border:1px solid var(--border);color:var(--text-sec);padding:3px 9px;border-radius:5px;font-size:.75rem;cursor:pointer}
+.svc-quick-btn:hover{border-color:var(--accent);color:var(--accent)}
+.svc-add-row{display:flex;gap:6px;margin-bottom:8px}
+.svc-add-row input{flex:1;padding:5px 8px}
+.svc-list-item{display:flex;align-items:center;justify-content:space-between;padding:4px 6px;border-radius:4px;font-size:.78rem;background:var(--surface);margin-bottom:3px}
+.svc-list-item .svc-remove{background:none;border:none;color:var(--text-sec);cursor:pointer;font-size:.85rem;padding:0 2px;border-radius:3px}
+.svc-list-item .svc-remove:hover{color:var(--red)}
+/* ── Service drill-down modal ── */
+.svc-drilldown-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.svc-stat{background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:10px;text-align:center}
+.svc-stat .sv{font-size:1.1rem;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--text)}
+.svc-stat .sl{font-size:.67rem;color:var(--text-sec);text-transform:uppercase;letter-spacing:.05em;margin-top:3px}
+.timeline-bar{height:12px;border-radius:6px;overflow:hidden;display:flex;margin-bottom:10px}
+.timeline-seg{height:100%}
+.timeline-seg.running{background:var(--green)}
+.timeline-seg.failed{background:var(--red)}
+.period-btns{display:flex;gap:4px;margin-bottom:12px}
+.period-btn{background:var(--surface);border:1px solid var(--border);color:var(--text-sec);padding:3px 10px;border-radius:5px;font-size:.75rem;cursor:pointer}
+.period-btn.active{background:var(--accent);color:#0b0f14;border-color:var(--accent);font-weight:600}
+.transition-item{padding:5px 0;border-bottom:1px solid rgba(30,45,61,.5);font-size:.78rem;display:flex;align-items:center;gap:8px}
+.transition-item:last-child{border-bottom:none}
+
 .muted{color:var(--text-sec);font-size:.8rem}
 .bold{font-weight:600}
 .error-text{color:var(--red)}
@@ -697,6 +738,35 @@ table.jobs-table{width:100%;border-collapse:collapse;font-size:.83rem}
   </div>
 </div>
 
+<!-- Service Drill-Down Modal -->
+<div class="modal-overlay" id="svcDrillModal">
+  <div class="modal" style="max-width:560px">
+    <h2 id="svcDrillTitle" style="color:var(--text)">Service: <span id="svcDrillName"></span></h2>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <span id="svcDrillStatus" style="font-size:.9rem;font-weight:600"></span>
+      <span id="svcDrillLastActive" class="muted" style="font-size:.78rem"></span>
+    </div>
+    <div class="period-btns">
+      <button class="period-btn active" data-period="1h" onclick="svcDrillSetPeriod('1h',this)">1h</button>
+      <button class="period-btn" data-period="24h" onclick="svcDrillSetPeriod('24h',this)">24h</button>
+      <button class="period-btn" data-period="7d" onclick="svcDrillSetPeriod('7d',this)">7d</button>
+      <button class="period-btn" data-period="30d" onclick="svcDrillSetPeriod('30d',this)">30d</button>
+    </div>
+    <div class="svc-drilldown-stats">
+      <div class="svc-stat"><div class="sv" id="svcStatUptime">&#8211;</div><div class="sl">Uptime %</div></div>
+      <div class="svc-stat"><div class="sv" id="svcStatRestarts">&#8211;</div><div class="sl">Restarts</div></div>
+      <div class="svc-stat"><div class="sv" id="svcStatOutage">&#8211;</div><div class="sl">Longest Outage</div></div>
+    </div>
+    <div style="font-size:.72rem;color:var(--text-sec);margin-bottom:4px;text-transform:uppercase;letter-spacing:.04em">Status Timeline</div>
+    <div class="timeline-bar" id="svcTimeline"></div>
+    <div style="font-size:.72rem;color:var(--text-sec);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em">Events</div>
+    <div id="svcTransitionList" style="max-height:160px;overflow-y:auto"></div>
+    <div class="form-actions" style="margin-top:14px">
+      <button class="btn-secondary" onclick="closeSvcDrill()">Close</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ── State ──────────────────────────────────────────────────────────────────
 let instances = [];
@@ -715,6 +785,12 @@ let alertSubscriptions = new Set();
 let currentUserRole = null;
 let rolesCache = [];
 let groupsCache = [];
+// Service drill-down state
+let svcDrillInstanceId = null;
+let svcDrillServiceName = null;
+let svcDrillPeriod = '24h';
+// Detail panel state
+let detailPanelInstanceId = null;
 
 // ── Bootstrap ───────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
@@ -1011,6 +1087,25 @@ function renderServices(d) {
   el.innerHTML = html;
 }
 
+// ── Sparkline SVG helper ──────────────────────────────────────────────────────
+function renderSparklineSvg(points, color) {
+  if (!points || points.length < 2) {
+    return `<svg class="sparkline-svg" viewBox="0 0 60 28" preserveAspectRatio="none"><line x1="0" y1="14" x2="60" y2="14" stroke="${color}" stroke-width="1" stroke-dasharray="2,2" opacity=".3"/></svg>`;
+  }
+  const vals = points.map(p => p.value);
+  const mn = Math.min(...vals), mx = Math.max(...vals);
+  const range = mx - mn || 1;
+  const w = 60, h = 28, pad = 2;
+  const xs = points.map((_, i) => pad + (i / (points.length - 1)) * (w - pad * 2));
+  const ys = vals.map(v => h - pad - ((v - mn) / range) * (h - pad * 2));
+  const pts = xs.map((x, i) => `${x.toFixed(1)},${ys[i].toFixed(1)}`).join(' ');
+  const last = vals[vals.length - 1];
+  return `<svg class="sparkline-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>
+    <circle cx="${xs[xs.length-1].toFixed(1)}" cy="${ys[ys.length-1].toFixed(1)}" r="2" fill="${color}"/>
+  </svg>`;
+}
+
 // ── Dashboard ────────────────────────────────────────────────────────────────
 async function loadDashboard() {
   const d = await fetch('/api/dashboard').then(r => r.json());
@@ -1026,6 +1121,31 @@ async function loadDashboard() {
     const i = t.instance;
     const score = t.health_score || 0;
     const rc = score >= 80 ? 'var(--green)' : score >= 60 ? 'var(--amber)' : 'var(--red)';
+    const sl = t.sparklines || {};
+
+    // Sparklines
+    const cpuColor = 'var(--accent)';
+    const memColor = 'var(--green)';
+    const diskColor = 'var(--amber)';
+    const sparkHtml = `<div class="sparkline-row">
+      <div class="sparkline-wrap"><div class="sparkline-label">CPU</div>${renderSparklineSvg(sl.cpu||[], cpuColor)}</div>
+      <div class="sparkline-wrap"><div class="sparkline-label">Mem</div>${renderSparklineSvg(sl.mem||[], memColor)}</div>
+      <div class="sparkline-wrap"><div class="sparkline-label">Disk${t.disk_forecast ? `<span class="forecast-badge">${esc(t.disk_forecast)}</span>` : ''}</div>${renderSparklineSvg(sl.disk||[], diskColor)}</div>
+    </div>`;
+
+    // Service chips
+    const chips = (t.service_chips || []);
+    const chipsHtml = chips.length
+      ? `<div class="svc-chips">${chips.map(c =>
+          `<span class="svc-chip ${c.status === 'running' ? 'running' : 'failed'}" onclick="openSvcDrill(${i.id},'${esc(c.name)}')" title="Click for details">
+            ${c.status === 'failed' ? '&#9679; ' : ''}${esc(c.name)}${c.status === 'failed' ? ' · failed' : ''}
+          </span>`).join('')}</div>`
+      : '';
+
+    // AI insight
+    const insightHtml = t.ai_insight
+      ? `<div class="tile-insight">${esc(t.ai_insight)}</div>` : '';
+
     return `<div class="tile">
       <div class="tile-header">
         <div class="health-ring" style="border-color:${rc}">${score}</div>
@@ -1035,10 +1155,14 @@ async function loadDashboard() {
           <div class="tile-host">${esc(i.host)}</div>
         </div>
       </div>
+      ${sparkHtml}
+      ${chipsHtml}
+      ${insightHtml}
       <div class="tile-btns">
         <button class="tile-btn" onclick="selectInstance(${i.id})">&#128172; Chat</button>
         <button class="tile-btn" onclick="studyInstance(${i.id})">&#8853; Study</button>
         <button class="tile-btn" onclick="openSchedule(${i.id})">&#9201; Schedule</button>
+        <button class="tile-btn" onclick="openInstanceDetail(${i.id})">&#9998; Services</button>
       </div>
     </div>`;
   }).join('');
@@ -1107,6 +1231,7 @@ function closeModal() {
   document.getElementById('userModal').classList.remove('show');
   document.getElementById('groupModal').classList.remove('show');
   document.getElementById('membersModal').classList.remove('show');
+  document.getElementById('svcDrillModal').classList.remove('show');
   document.getElementById('userModalInviteLink').classList.add('hidden');
   document.getElementById('userModalBtn').onclick = submitUserModal;
 }
@@ -1197,6 +1322,9 @@ function addChatMsg(role, html) {
   box.scrollTop = box.scrollHeight;
   return el;
 }
+// Metric-related keywords that trigger history context injection
+const METRIC_KEYWORDS = /\b(cpu|memory|mem|disk|usage|trend|rising|high|utilization|load|swap|storage|inode|spike|drift|lag|slow|performance)\b/i;
+
 async function sendChat() {
   const input = document.getElementById('chatInput');
   const text = input.value.trim();
@@ -1213,6 +1341,16 @@ async function sendChat() {
     }
     return;
   }
+
+  // If message looks metric-related, prepend recent history context
+  let metricContext = '';
+  if (METRIC_KEYWORDS.test(text)) {
+    try {
+      const ctx = await fetch(`/api/instances/${selectedInstanceId}/metrics_context`).then(r => r.json());
+      metricContext = ctx.context || '';
+    } catch {}
+  }
+
   const thinkMsg = addChatMsg('agent', '<span class="spinner"></span> Classifying\u2026');
   let intent;
   try {
@@ -1221,9 +1359,10 @@ async function sendChat() {
   } catch (e) { thinkMsg.innerHTML = '<span class="error-text">Classification failed.</span>'; return; }
   thinkMsg.innerHTML = `<span class="spinner"></span> Intent: <b>${intent}</b> &#8212; collecting system data&#8230;`;
   if (intent === 'troubleshoot') {
+    const issueWithCtx = metricContext ? `${text}\n\n[Metric history]\n${metricContext}` : text;
     const [aiRes, planRes] = await Promise.all([
-      fetch('/api/diagnose', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instance_id: selectedInstanceId, problem: text, context: '' }) }).then(r => r.json()).catch(() => null),
-      fetch('/api/diagnose/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instance_id: selectedInstanceId, issue: text }) }).then(r => r.json()),
+      fetch('/api/diagnose', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instance_id: selectedInstanceId, problem: text, context: metricContext }) }).then(r => r.json()).catch(() => null),
+      fetch('/api/diagnose/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instance_id: selectedInstanceId, issue: issueWithCtx }) }).then(r => r.json()),
     ]);
     if (aiRes && !aiRes.error) {
       thinkMsg.innerHTML = renderAIDiagnosisCard(aiRes);
@@ -1579,6 +1718,167 @@ async function triggerNow() {
   if (!scheduleInstanceId) return;
   await fetch(`/api/instances/${scheduleInstanceId}/trigger`, { method: 'POST' }).then(r => r.json());
   document.getElementById('schedResult').innerHTML = '<span class="green-text">&#10004; Triggered in background</span>';
+}
+
+// ── Instance detail panel (Monitored Services) ────────────────────────────────
+const COMMON_SERVICES = ['nginx','postgresql','docker','redis','mysql','apache2'];
+
+async function openInstanceDetail(instanceId) {
+  detailPanelInstanceId = instanceId;
+  const inst = instances.find(i => i.id === instanceId);
+  document.getElementById('sidePanelTitle').textContent = (inst ? esc(inst.label) : 'Instance') + ' — Monitored Services';
+  await renderDetailPanelBody(instanceId);
+  document.getElementById('sidePanel').classList.add('open');
+}
+
+async function renderDetailPanelBody(instanceId) {
+  const body = document.getElementById('sidePanelBody');
+  body.innerHTML = '<span class="spinner"></span>';
+  let svcs = [];
+  try {
+    const r = await fetch(`/api/instances/${instanceId}/monitored_services`).then(r => r.json());
+    svcs = r.services || [];
+  } catch {}
+
+  const quickBtns = COMMON_SERVICES.map(s =>
+    `<button class="svc-quick-btn" onclick="quickAddService(${instanceId},'${s}')">${esc(s)}</button>`
+  ).join('');
+
+  const svcListHtml = svcs.length
+    ? svcs.map(s => `<div class="svc-list-item" id="svc-item-${s.id}">
+        <span>${esc(s.service_name)}</span>
+        <button class="svc-remove" title="Remove" onclick="removeSvc(${instanceId},${s.id})">&#10005;</button>
+      </div>`).join('')
+    : '<div class="muted" style="font-size:.78rem">No services configured yet.</div>';
+
+  body.innerHTML = `
+    <div class="svc-mgmt">
+      <h3>Quick-add common services</h3>
+      <div class="svc-quick-btns">${quickBtns}</div>
+      <h3>Add any service</h3>
+      <div class="svc-add-row">
+        <input id="svcAddInput" type="text" placeholder="e.g. prometheus, sshd, …" onkeydown="if(event.key==='Enter')addCustomSvc(${instanceId})">
+        <button class="btn-sm" onclick="addCustomSvc(${instanceId})">Add</button>
+      </div>
+      <h3>Currently monitored</h3>
+      <div id="svcManagedList">${svcListHtml}</div>
+    </div>`;
+}
+
+async function quickAddService(instanceId, name) {
+  await doAddSvc(instanceId, name);
+}
+
+async function addCustomSvc(instanceId) {
+  const input = document.getElementById('svcAddInput');
+  const name = (input?.value || '').trim();
+  if (!name) return;
+  input.value = '';
+  await doAddSvc(instanceId, name);
+}
+
+async function doAddSvc(instanceId, name) {
+  try {
+    await fetch(`/api/instances/${instanceId}/monitored_services`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({service_name: name})
+    });
+    await renderDetailPanelBody(instanceId);
+  } catch {}
+}
+
+async function removeSvc(instanceId, serviceId) {
+  try {
+    await fetch(`/api/instances/${instanceId}/monitored_services/${serviceId}`, {method:'DELETE'});
+    const el = document.getElementById('svc-item-' + serviceId);
+    if (el) el.remove();
+    // Refresh to avoid stale ids
+    await renderDetailPanelBody(instanceId);
+  } catch {}
+}
+
+// ── Service drill-down ────────────────────────────────────────────────────────
+async function openSvcDrill(instanceId, serviceName) {
+  svcDrillInstanceId = instanceId;
+  svcDrillServiceName = serviceName;
+  svcDrillPeriod = '24h';
+  document.getElementById('svcDrillName').textContent = serviceName;
+  document.querySelectorAll('.period-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.period === svcDrillPeriod));
+  document.getElementById('svcDrillModal').classList.add('show');
+  await loadSvcDrillData();
+}
+
+function closeSvcDrill() {
+  document.getElementById('svcDrillModal').classList.remove('show');
+}
+
+async function svcDrillSetPeriod(period, btn) {
+  svcDrillPeriod = period;
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.toggle('active', b.dataset.period === period));
+  await loadSvcDrillData();
+}
+
+async function loadSvcDrillData() {
+  if (!svcDrillInstanceId || !svcDrillServiceName) return;
+  const url = `/api/instances/${svcDrillInstanceId}/service_history?service=${encodeURIComponent(svcDrillServiceName)}&period=${svcDrillPeriod}`;
+  let data;
+  try {
+    data = await fetch(url).then(r => r.json());
+  } catch { return; }
+
+  const rows = data.rows || [];
+  // Current status from last row
+  const lastRow = rows.length ? rows[rows.length - 1] : null;
+  const curStatus = lastRow ? lastRow.status : 'unknown';
+  const statusColor = curStatus === 'running' ? 'var(--green)' : (curStatus === 'failed' ? 'var(--red)' : 'var(--text-sec)');
+  document.getElementById('svcDrillStatus').innerHTML = `<span style="color:${statusColor}">${curStatus === 'running' ? '● Running' : curStatus === 'failed' ? '● Failed' : '&#8211; unknown'}</span>`;
+
+  // Last active
+  const lastRunning = [...rows].reverse().find(r => r.status === 'running');
+  document.getElementById('svcDrillLastActive').textContent = lastRunning
+    ? 'Last active: ' + fmtDate(lastRunning.recorded_at)
+    : (rows.length ? '' : 'No data for period');
+
+  // Stats
+  document.getElementById('svcStatUptime').textContent =
+    data.uptime_pct != null ? data.uptime_pct + '%' : '\u2013';
+  document.getElementById('svcStatRestarts').textContent = data.restart_count ?? '\u2013';
+  const outs = data.longest_outage_sec || 0;
+  document.getElementById('svcStatOutage').textContent = outs > 0 ? fmtDuration(outs) : '\u2013';
+
+  // Timeline
+  const tl = document.getElementById('svcTimeline');
+  if (!rows.length) {
+    tl.innerHTML = '<div style="flex:1;background:var(--surface);border-radius:6px"></div>';
+  } else {
+    // Each row is a data point; proportional segments
+    const total = rows.length;
+    tl.innerHTML = rows.map(r =>
+      `<div class="timeline-seg ${r.status}" style="flex:${1}" title="${r.status} at ${r.recorded_at}"></div>`
+    ).join('');
+  }
+
+  // Transitions
+  const trs = data.transitions || [];
+  const trEl = document.getElementById('svcTransitionList');
+  if (!trs.length) {
+    trEl.innerHTML = '<div class="muted" style="font-size:.75rem">No status changes in period.</div>';
+  } else {
+    trEl.innerHTML = trs.map(tr => {
+      const arrow = tr.from === 'failed' ? '<span style="color:var(--green)">&#8593; Recovered</span>'
+        : '<span style="color:var(--red)">&#8595; Failed</span>';
+      return `<div class="transition-item">${arrow}<span class="muted">${fmtDate(tr.at)}</span></div>`;
+    }).reverse().slice(0, 20).join('');
+  }
+}
+
+function fmtDuration(secs) {
+  if (secs < 60) return secs + 's';
+  if (secs < 3600) return Math.floor(secs / 60) + 'm';
+  if (secs < 86400) return Math.floor(secs / 3600) + 'h';
+  return Math.floor(secs / 86400) + 'd';
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────

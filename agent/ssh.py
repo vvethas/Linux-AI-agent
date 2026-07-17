@@ -282,6 +282,39 @@ class SSHManager:
                 }
         return output
 
+    def collect_quick_metrics(self, instance: Dict[str, Any]) -> Dict[str, Optional[float]]:
+        """Return numeric CPU%, memory%, and disk-root% for *instance*.
+
+        Uses simple /proc reads and df so the results are numeric and
+        already normalised to 0-100.  Any individual metric that fails
+        to parse is returned as None.
+        """
+        commands = {
+            "cpu": (
+                "awk '/^cpu / {"
+                "  idle=$5+$6; total=0;"
+                "  for(i=2;i<=NF;i++) total+=$i;"
+                "  printf \"%.1f\", (1-idle/total)*100"
+                "}' /proc/stat"
+            ),
+            "mem": (
+                "awk '/^MemTotal/{t=$2} /^MemAvailable/{a=$2}"
+                " END{printf \"%.1f\", (1-a/t)*100}' /proc/meminfo"
+            ),
+            "disk": (
+                "df / | awk 'NR==2{gsub(/%/,\"\"); printf \"%s\", $5}'"
+            ),
+        }
+        result: Dict[str, Optional[float]] = {"cpu": None, "mem": None, "disk": None}
+        for key, cmd in commands.items():
+            try:
+                out = self.execute(instance, cmd, timeout=10, get_pty=False)
+                val = float(out.get("stdout", "").strip())
+                result[key] = val
+            except Exception:
+                pass
+        return result
+
     def write_temp_file(
         self,
         instance: Dict[str, Any],
