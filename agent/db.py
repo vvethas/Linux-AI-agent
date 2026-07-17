@@ -759,14 +759,28 @@ class Database:
         return [self._row_to_dict(r) for r in rows]
 
     def update_user(self, user_id: int, **fields: Any) -> None:
-        allowed = {"name", "email", "role_id", "status", "password_hash", "invite_token"}
-        fields = {k: v for k, v in fields.items() if k in allowed}
-        if not fields:
+        # Column-to-fragment map with compile-time constants — no external data
+        # is ever interpolated into the SQL string, preventing SQL injection.
+        _COLUMNS = {
+            "name": "name=?",
+            "email": "email=?",
+            "role_id": "role_id=?",
+            "status": "status=?",
+            "password_hash": "password_hash=?",
+            "invite_token": "invite_token=?",
+        }
+        parts: List[str] = []
+        params: List[Any] = []
+        for col, frag in _COLUMNS.items():
+            if col in fields:
+                parts.append(frag)
+                params.append(fields[col])
+        if not parts:
             return
-        parts = ", ".join(f"{k}=?" for k in fields)
-        params = list(fields.values()) + [user_id]
+        params.append(user_id)
+        sql = "UPDATE users SET " + ", ".join(parts) + " WHERE id=?"
         with self._lock, self._connect() as conn:
-            conn.execute(f"UPDATE users SET {parts} WHERE id=?", params)
+            conn.execute(sql, params)
 
     def set_user_password(self, user_id: int, password_hash: str) -> None:
         with self._lock, self._connect() as conn:
@@ -837,14 +851,22 @@ class Database:
         return self._row_to_dict(row)
 
     def update_group(self, group_id: int, **fields: Any) -> None:
-        allowed = {"name", "role_id"}
-        fields = {k: v for k, v in fields.items() if k in allowed}
-        if not fields:
+        _COLUMNS = {
+            "name": "name=?",
+            "role_id": "role_id=?",
+        }
+        parts: List[str] = []
+        params: List[Any] = []
+        for col, frag in _COLUMNS.items():
+            if col in fields:
+                parts.append(frag)
+                params.append(fields[col])
+        if not parts:
             return
-        parts = ", ".join(f"{k}=?" for k in fields)
-        params = list(fields.values()) + [group_id]
+        params.append(group_id)
+        sql = "UPDATE groups SET " + ", ".join(parts) + " WHERE id=?"
         with self._lock, self._connect() as conn:
-            conn.execute(f"UPDATE groups SET {parts} WHERE id=?", params)
+            conn.execute(sql, params)
 
     def delete_group(self, group_id: int) -> None:
         with self._lock, self._connect() as conn:
