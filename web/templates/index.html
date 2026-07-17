@@ -463,17 +463,22 @@ table.jobs-table{width:100%;border-collapse:collapse;font-size:.83rem}
     <div class="form-row"><label>Username</label><input id="inst-user" type="text" placeholder="root"></div>
     <div class="form-row"><label>Auth Type</label>
       <select id="inst-auth" onchange="authTypeChange()">
-        <option value="key">SSH Key</option>
+        <option value="key">SSH key (path on control server)</option>
+        <option value="key_paste">Paste private key</option>
+        <option value="key_upload">Upload .pem file</option>
         <option value="password">Password</option>
       </select>
     </div>
     <div class="form-row" id="keyPathRow"><label>Key Path (on control server)</label><input id="inst-key" type="text" placeholder="/root/.ssh/id_rsa"></div>
+    <div class="form-row hidden" id="keyPasteRow"><label>Private Key</label><textarea id="inst-key-paste" rows="6" style="font-family:'JetBrains Mono',monospace;font-size:.78rem;resize:vertical" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...&#10;-----END OPENSSH PRIVATE KEY-----"></textarea></div>
+    <div class="form-row hidden" id="keyUploadRow"><label>Private Key File (.pem)</label><input id="inst-key-file" type="file" accept=".pem,.key,application/x-pem-file" style="padding:5px 8px"></div>
+    <div class="form-row hidden" id="passphraseRow"><label>Passphrase <span class="muted">(optional)</span></label><input id="inst-passphrase" type="password" placeholder="leave blank if none"></div>
     <div class="form-row hidden" id="pwRow"><label>Password</label><input id="inst-pw" type="password"></div>
     <div class="form-row"><label>Tags (comma-separated)</label><input id="inst-tags" type="text" placeholder="prod, web, nginx"></div>
     <div id="addInstResult" class="muted" style="margin-top:4px"></div>
     <div class="form-actions">
       <button class="btn-secondary" onclick="closeModal()">Cancel</button>
-      <button class="btn-primary" onclick="submitAddInstance()">Add &amp; Test</button>
+      <button class="btn-primary" id="addInstBtn" onclick="submitAddInstance()">Add &amp; Test</button>
     </div>
   </div>
 </div>
@@ -827,30 +832,76 @@ async function loadDashboard() {
 
 // ── Add Instance Modal ────────────────────────────────────────────────────────
 function showAddInstance() { document.getElementById('addModal').classList.add('show'); }
-function closeModal() { document.getElementById('addModal').classList.remove('show'); document.getElementById('addInstResult').textContent = ''; }
+function closeModal() {
+  document.getElementById('addModal').classList.remove('show');
+  document.getElementById('addInstResult').textContent = '';
+  document.getElementById('inst-key-paste').value = '';
+  document.getElementById('inst-passphrase').value = '';
+  document.getElementById('inst-pw').value = '';
+  document.getElementById('inst-key-file').value = '';
+}
 function authTypeChange() {
-  const pw = document.getElementById('inst-auth').value === 'password';
-  document.getElementById('pwRow').classList.toggle('hidden', !pw);
-  document.getElementById('keyPathRow').classList.toggle('hidden', pw);
+  const v = document.getElementById('inst-auth').value;
+  document.getElementById('keyPathRow').classList.toggle('hidden', v !== 'key');
+  document.getElementById('keyPasteRow').classList.toggle('hidden', v !== 'key_paste');
+  document.getElementById('keyUploadRow').classList.toggle('hidden', v !== 'key_upload');
+  document.getElementById('passphraseRow').classList.toggle('hidden', v !== 'key_paste' && v !== 'key_upload');
+  document.getElementById('pwRow').classList.toggle('hidden', v !== 'password');
 }
 async function submitAddInstance() {
+  const authType = document.getElementById('inst-auth').value;
+  const msgEl = document.getElementById('addInstResult');
+  const btn = document.getElementById('addInstBtn');
+
+  let keyContent = null;
+  if (authType === 'key_upload') {
+    const file = document.getElementById('inst-key-file').files[0];
+    if (!file) { msgEl.innerHTML = '<span class="error-text">Please select a .pem file.</span>'; return; }
+    try {
+      keyContent = await file.text();
+    } catch (e) { msgEl.innerHTML = '<span class="error-text">Could not read file.</span>'; return; }
+  } else if (authType === 'key_paste') {
+    keyContent = document.getElementById('inst-key-paste').value.trim();
+    if (!keyContent) { msgEl.innerHTML = '<span class="error-text">Please paste a private key.</span>'; return; }
+  }
+
   const payload = {
     label: document.getElementById('inst-label').value.trim(),
     host: document.getElementById('inst-host').value.trim(),
     port: parseInt(document.getElementById('inst-port').value) || 22,
     username: document.getElementById('inst-user').value.trim(),
-    auth_type: document.getElementById('inst-auth').value,
-    key_path: document.getElementById('inst-key').value.trim() || null,
-    password: document.getElementById('inst-pw').value || null,
+    auth_type: authType,
+    key_path: authType === 'key' ? (document.getElementById('inst-key').value.trim() || null) : null,
+    password: authType === 'password' ? (document.getElementById('inst-pw').value || null) : null,
+    key_content: keyContent,
+    passphrase: (authType === 'key_paste' || authType === 'key_upload') ? (document.getElementById('inst-passphrase').value || null) : null,
     tags: document.getElementById('inst-tags').value,
   };
-  const res = await fetch('/api/instances', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).then(r => r.json());
-  const msgEl = document.getElementById('addInstResult');
-  if (res.error) { msgEl.innerHTML = `<span class="error-text">${esc(res.error)}</span>`; return; }
-  const ok = res.ssh_test?.ok;
-  msgEl.innerHTML = ok ? `<span class="green-text">&#10004; Added &amp; SSH OK</span>` : `<span style="color:var(--amber)">Added &#8212; SSH issue: ${esc(res.ssh_test?.reason || '?')}</span>`;
+
+  btn.disabled = true;
+  msgEl.innerHTML = '<span class="muted"><span class="spinner"></span> Testing SSH connection&hellip;</span>';
+  let res;
+  try {
+    res = await fetch('/api/instances', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).then(r => r.json());
+  } catch (e) {
+    msgEl.innerHTML = '<span class="error-text">Network error.</span>';
+    btn.disabled = false;
+    return;
+  }
+  btn.disabled = false;
+
+  if (res.error) {
+    const reason = res.ssh_test?.reason ? ` (${res.ssh_test.reason})` : '';
+    msgEl.innerHTML = `<span class="error-text">&#10007; ${esc(res.error)}${esc(reason)}</span>`;
+    return;
+  }
+
+  const inst = res.instance || {};
+  let fingerInfo = '';
+  if (inst.key_fingerprint) fingerInfo = ` &mdash; Key ending in <code>${esc(inst.key_fingerprint)}</code>`;
+  msgEl.innerHTML = `<span class="green-text">&#10004; Added &amp; SSH OK${fingerInfo}</span>`;
   await loadInstances(); loadDashboard();
-  setTimeout(closeModal, 1200);
+  setTimeout(closeModal, 2000);
 }
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
