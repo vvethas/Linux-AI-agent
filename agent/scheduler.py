@@ -10,8 +10,10 @@ from .notify import Notifier
 from .ssh import SSHManager
 from .study import StudyRunner
 
-# Drift thresholds
+# Drift thresholds (defaults — can be overridden via config table keys
+# 'drift_warn_pct' and 'drift_consecutive_polls')
 _DRIFT_WARN_PCT = 20.0   # warn if metric is >20 percentage points above rolling avg
+_DRIFT_CONSECUTIVE_POLLS = 3  # require N consecutive high polls before alerting
 _DRIFT_CRIT_SVC = True   # critical alert whenever a monitored service goes failed
 
 
@@ -125,16 +127,41 @@ class HealthScheduler:
 
     # ── Drift / correlation helpers ───────────────────────────────────────────
 
+    def _get_drift_config(self) -> tuple:
+        """Return (warn_pct, consecutive_polls) from config table or defaults."""
+        warn_pct = _DRIFT_WARN_PCT
+        consecutive = _DRIFT_CONSECUTIVE_POLLS
+        try:
+            cfg = self.db.get_config_json("drift_thresholds", default={})
+            if cfg.get("warn_pct"):
+                warn_pct = float(cfg["warn_pct"])
+            if cfg.get("consecutive_polls"):
+                consecutive = int(cfg["consecutive_polls"])
+        except Exception:
+            pass
+        return warn_pct, consecutive
+
     def _check_metric_drift(self, instance_id: int, metric: str, current: float) -> None:
+        warn_pct, consecutive_required = self._get_drift_config()
         avg = self.db.get_metric_rolling_avg(instance_id, metric, n=10)
         if avg is None:
             return
         diff = current - avg
         alert_msg = f"{metric.upper()} usage at {current:.0f}% — {diff:+.0f}pp vs rolling avg ({avg:.0f}%)"
-        if diff >= _DRIFT_WARN_PCT:
-            existing = self.db.find_open_alert(instance_id, "warning", alert_msg)
-            if not existing:
-                self.db.create_alert(instance_id, "warning", alert_msg)
+
+        if diff >= warn_pct:
+            # Check if the last N consecutive polls all exceed threshold
+            recent_values = self.db.get_recent_metric_values(
+                instance_id, metric, n=consecutive_required
+            )
+            if len(recent_values) >= consecutive_required:
+                all_above = all(
+                    (v - avg) >= warn_pct for v in recent_values
+                )
+                if all_above:
+                    existing = self.db.find_open_alert(instance_id, "warning", alert_msg)
+                    if not existing:
+                        self.db.create_alert(instance_id, "warning", alert_msg)
         else:
             self.db.resolve_alerts_for_condition(instance_id, "warning", alert_msg)
 
@@ -157,15 +184,31 @@ class HealthScheduler:
         # Only run if something is notable
         failed_svcs = [s["service_name"] for s in service_statuses if s.get("status") == "failed"]
         high_metrics = {k: v for k, v in metrics.items() if v is not None and v >= 80}
-        if not failed_svcs and not high_metrics:
+
+        # Also detect trending metrics (rising over recent polls)
+        trending: Dict[str, str] = {}
+        for metric in ("cpu", "mem", "disk"):
+            recent = self.db.get_recent_metric_values(instance_id, metric, n=5)
+            if len(recent) >= 3:
+                # recent is most-recent-first; check if values are rising
+                reversed_vals = list(reversed(recent))
+                if all(reversed_vals[i] < reversed_vals[i + 1] for i in range(len(reversed_vals) - 1)):
+                    trending[metric] = f"rising ({reversed_vals[0]:.0f}→{reversed_vals[-1]:.0f}%)"
+
+        if not failed_svcs and not high_metrics and not trending:
+            # Clear stale insight if nothing notable
+            self.db.set_config_json(f"insight_{instance_id}", {"text": ""})
             return
 
         # Build a short context summary
         metric_lines = ", ".join(f"{k}={v:.0f}%" for k, v in high_metrics.items())
         svc_lines = ", ".join(failed_svcs)
+        trend_lines = ", ".join(f"{k} {v}" for k, v in trending.items())
         context_parts = []
         if metric_lines:
             context_parts.append(f"High metrics: {metric_lines}")
+        if trend_lines:
+            context_parts.append(f"Trending: {trend_lines}")
         if svc_lines:
             context_parts.append(f"Failed services: {svc_lines}")
 

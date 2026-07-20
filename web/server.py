@@ -12,6 +12,7 @@ if _ROOT not in sys.path:
 
 import hashlib
 import json
+import re
 import secrets
 import sqlite3
 import time
@@ -993,6 +994,35 @@ def metrics_context(instance_id: int):
     return jsonify({"context": "\n".join(lines)})
 
 
+# ── Drift thresholds configuration ───────────────────────────────────────────
+
+@app.route("/api/drift_thresholds", methods=["GET"])
+@require_permission("view")
+def get_drift_thresholds():
+    cfg = db.get_config_json("drift_thresholds", default={})
+    return jsonify({
+        "warn_pct": cfg.get("warn_pct", 20.0),
+        "consecutive_polls": cfg.get("consecutive_polls", 3),
+    })
+
+
+@app.route("/api/drift_thresholds", methods=["PUT"])
+@require_permission("manage_instances")
+def set_drift_thresholds():
+    payload = request.get_json(force=True) or {}
+    warn_pct = float(payload.get("warn_pct", 20.0))
+    consecutive_polls = int(payload.get("consecutive_polls", 3))
+    if warn_pct < 1 or warn_pct > 100:
+        return _err("warn_pct must be between 1 and 100")
+    if consecutive_polls < 1 or consecutive_polls > 20:
+        return _err("consecutive_polls must be between 1 and 20")
+    db.set_config_json("drift_thresholds", {
+        "warn_pct": warn_pct,
+        "consecutive_polls": consecutive_polls,
+    })
+    return jsonify({"ok": True, "warn_pct": warn_pct, "consecutive_polls": consecutive_polls})
+
+
 @app.route("/api/classify", methods=["POST"])
 @require_permission("run_diagnostics")
 def classify():
@@ -1054,6 +1084,32 @@ def ai_diagnose():
     context = str(payload.get("context", ""))
     if not instance_id or not problem:
         return _err("missing instance_id or problem")
+
+    # Server-side metric enrichment: if the problem text looks metric-related
+    # and no context was provided by the frontend, fetch it here.
+    _METRIC_RE = re.compile(
+        r'\b(cpu|memory|mem|disk|usage|trend|rising|high|utilization|load|swap'
+        r'|storage|inode|spike|drift|lag|slow|performance)\b', re.IGNORECASE
+    )
+    if _METRIC_RE.search(problem) and not context and instance_id.isdigit():
+        try:
+            iid = int(instance_id)
+            lines = []
+            for metric in ("cpu", "mem", "disk"):
+                pts = db.get_metric_history(iid, metric, hours=24)
+                if pts:
+                    vals = [f"{p['value']:.0f}" for p in pts[-8:]]
+                    lines.append(f"{metric.upper()} last 24h (%): {', '.join(vals)}")
+            svc_rows = db.get_latest_service_statuses(iid)
+            if svc_rows:
+                svc_summary = ", ".join(
+                    f"{s['service_name']}={s['status']}" for s in svc_rows
+                )
+                lines.append(f"Monitored services: {svc_summary}")
+            if lines:
+                context = "\n".join(lines)
+        except Exception:
+            pass
 
     fingerprint = hashlib.sha256((instance_id + problem).encode()).hexdigest()[:16]
     now = datetime.now(timezone.utc).isoformat()
