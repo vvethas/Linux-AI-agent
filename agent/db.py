@@ -1043,6 +1043,19 @@ class Database:
             return None
         return sum(r[0] for r in rows) / len(rows)
 
+    def get_recent_metric_values(
+        self, instance_id: int, metric_name: str, n: int = 3
+    ) -> List[float]:
+        """Return the last *n* metric values (most recent first)."""
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT value FROM metric_history"
+                " WHERE instance_id=? AND metric_name=?"
+                " ORDER BY id DESC LIMIT ?",
+                (instance_id, metric_name, n),
+            ).fetchall()
+        return [r[0] for r in rows]
+
     # ── Monitored services ─────────────────────────────────────────────────────
 
     def add_monitored_service(self, instance_id: int, service_name: str) -> int:
