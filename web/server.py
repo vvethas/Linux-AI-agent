@@ -12,6 +12,7 @@ if _ROOT not in sys.path:
 
 import hashlib
 import json
+import secrets
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -258,6 +259,30 @@ def auth_change_password():
     return jsonify({"ok": True})
 
 
+@app.route("/api/auth/change_my_password", methods=["POST"])
+def auth_change_my_password():
+    """Self-service password change: any logged-in user can change their own
+    password by providing their current password and a new one."""
+    from flask import g as _g
+    user = _g.get("current_user")
+    if not user:
+        return _err("Authentication required", 401)
+    payload = request.get_json(force=True) or {}
+    current_password = str(payload.get("current_password", ""))
+    new_password = str(payload.get("new_password", ""))
+    if not current_password or not new_password:
+        return _err("current_password and new_password are required")
+    if len(new_password) < 8:
+        return _err("new password must be at least 8 characters")
+    if not user.get("password_hash"):
+        return _err("account has no password set — use invite link", 400)
+    if not check_password_hash(user["password_hash"], current_password):
+        return _err("current password is incorrect", 403)
+    db.set_user_password(user["id"], generate_password_hash(new_password))
+    log.info("Self-service password change: user '%s' (id=%s)", user["name"], user["id"])
+    return jsonify({"ok": True})
+
+
 # ── User management (Admin only) ──────────────────────────────────────────────
 
 @app.route("/api/roles", methods=["GET"])
@@ -372,6 +397,32 @@ def resend_invite(user_id: int):
     token = db.regenerate_invite_token(user_id)
     invite_url = f"/invite/{token}"
     return jsonify({"invite_url": invite_url})
+
+
+@app.route("/api/users/<int:user_id>/reset_password", methods=["POST"])
+@require_permission("manage_users")
+def reset_user_password(user_id: int):
+    """Admin-triggered password reset: generate a random temporary password,
+    set must_change_password=true so user is forced to choose their own."""
+    from flask import g as _g
+    user = db.get_user(user_id)
+    if not user:
+        return _err("user not found", 404)
+    # Generate a secure random temporary password
+    temp_password = secrets.token_urlsafe(12)
+    db.update_user(
+        user_id,
+        password_hash=generate_password_hash(temp_password),
+        must_change_password=1,
+        status="active",
+    )
+    admin = _g.get("current_user")
+    admin_name = admin["name"] if admin else "unknown"
+    log.info(
+        "Password reset: admin '%s' (id=%s) reset password for user '%s' (id=%s)",
+        admin_name, admin.get("id") if admin else "?", user["name"], user_id,
+    )
+    return jsonify({"ok": True, "temporary_password": temp_password})
 
 
 # ── Group management (Admin only) ─────────────────────────────────────────────
