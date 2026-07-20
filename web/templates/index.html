@@ -9,6 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 /* ── Reset & base ── */
+.hidden{display:none!important}
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
   --app-bg:#0b0f14;
@@ -60,10 +61,10 @@ code,pre{font-family:'JetBrains Mono',ui-monospace,monospace}
 .instance-item:hover .inst-actions-wrap{opacity:1}
 .icon-btn{background:none;color:var(--text-sec);font-size:.75rem;padding:2px 4px;border-radius:4px;border:1px solid transparent}
 .icon-btn:hover{color:var(--text);border-color:var(--border);background:var(--card-bg)}
-/* ── Hover-reveal bottom nav ── */
+/* ── Bottom nav (always visible) ── */
 .hover-nav-wrap{flex-shrink:0}
-.hover-strip{height:4px;background:#00bcd4;opacity:.4;transition:opacity .25s ease;cursor:default}
-.hover-nav{height:0;overflow:hidden;background:var(--sidebar-bg);display:flex;align-items:center;justify-content:center;gap:4px;border-top:1px solid var(--border);transition:height .25s ease}
+.hover-strip{display:none}
+.hover-nav{height:54px;overflow:visible;background:var(--sidebar-bg);display:flex;align-items:center;justify-content:center;gap:4px;border-top:1px solid var(--border)}
 .tab-nav-btn{background:none;border:1px solid transparent;color:var(--text-sec);padding:5px 10px;border-radius:7px;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;transition:.15s;min-width:58px}
 .tab-nav-btn:hover{color:var(--text);background:var(--surface)}
 .tab-nav-btn.active{background:#1a2332}
@@ -369,10 +370,6 @@ table.jobs-table{width:100%;border-collapse:collapse;font-size:.83rem}
             <h2>Recent Activity</h2>
             <div id="activityFeed"></div>
           </div>
-          <div class="panel">
-            <h2>Active Alerts</h2>
-            <div id="activeAlertsPanel"></div>
-          </div>
         </div>
 
         <!-- Chat tab -->
@@ -435,6 +432,14 @@ table.jobs-table{width:100%;border-collapse:collapse;font-size:.83rem}
 
         <!-- Alerts tab -->
         <div id="tab-alerts" class="hidden full-view">
+          <div class="panel">
+            <h2>Active Alerts</h2>
+            <div id="activeAlertsPanel"><div class="muted">No active alerts.</div></div>
+          </div>
+        </div>
+
+        <!-- Settings tab -->
+        <div id="tab-settings" class="hidden full-view">
           <div class="panel">
             <h2>Notification Settings</h2>
             <div class="settings-grid">
@@ -512,10 +517,6 @@ table.jobs-table{width:100%;border-collapse:collapse;font-size:.83rem}
               <div id="schedResult" class="muted" style="margin-top:8px"></div>
             </div>
           </div>
-        </div>
-
-        <!-- Settings tab (Users & access) -->
-        <div id="tab-settings" class="hidden full-view">
           <div class="panel">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
               <h2 style="margin-bottom:0">Users &amp; access</h2>
@@ -843,8 +844,8 @@ function switchTab(name) {
   });
   if (name === 'jobs') loadJobs();
   if (name === 'studies') loadStudies();
-  if (name === 'alerts') { loadNotifyConfig(); loadNotifySubscriptions(); }
-  if (name === 'settings') loadUsersAndGroups();
+  if (name === 'alerts') loadActiveAlerts();
+  if (name === 'settings') { loadNotifyConfig(); loadNotifySubscriptions(); loadUsersAndGroups(); }
 }
 
 // ── Mode toggle ────────────────────────────────────────────────────────────
@@ -1177,6 +1178,12 @@ async function loadDashboard() {
       <span class="muted">${fmtDate(j.started_at)}</span>
     </div>`).join('');
   renderActiveAlerts(d.active_alerts || []);
+}
+
+function loadActiveAlerts() {
+  fetch('/api/alerts/active').then(r => r.json()).then(d => {
+    renderActiveAlerts(d.alerts || []);
+  }).catch(() => {});
 }
 
 function renderActiveAlerts(alerts) {
@@ -1885,26 +1892,9 @@ function fmtDuration(secs) {
 function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 function fmtDate(iso) { if (!iso) return '\u2013'; try { return new Date(iso).toLocaleString(); } catch { return iso; } }
 
-// ── Hover nav ─────────────────────────────────────────────────────────────────
+// ── Hover nav (static – always visible, no show/hide behavior) ──────────────
 function initHoverNav() {
-  const wrap = document.getElementById('hoverNavWrap');
-  const strip = document.getElementById('hoverStrip');
-  const nav = document.getElementById('hoverNav');
-  let leaveTimer = null;
-  strip.addEventListener('mouseenter', () => {
-    clearTimeout(leaveTimer);
-    strip.style.opacity = '1';
-    nav.style.height = '54px';
-  });
-  nav.addEventListener('mouseenter', () => {
-    clearTimeout(leaveTimer);
-  });
-  wrap.addEventListener('mouseleave', () => {
-    leaveTimer = setTimeout(() => {
-      strip.style.opacity = '0.4';
-      nav.style.height = '0';
-    }, 400);
-  });
+  // Bottom nav is always visible; no hover behavior needed.
 }
 
 // ── Keyboard shortcuts ────────────────────────────────────────────────────────
