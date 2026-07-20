@@ -520,7 +520,10 @@ table.jobs-table{width:100%;border-collapse:collapse;font-size:.83rem}
           <div class="panel">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
               <h2 style="margin-bottom:0">Users &amp; access</h2>
-              <span id="settingsUserBadge" class="muted" style="font-size:.75rem"></span>
+              <div style="display:flex;align-items:center;gap:8px">
+                <button class="btn-sm" onclick="showChangeMyPasswordModal()">Change my password</button>
+                <span id="settingsUserBadge" class="muted" style="font-size:.75rem"></span>
+              </div>
             </div>
             <!-- Sub-tabs -->
             <div style="display:flex;gap:2px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:10px">
@@ -664,6 +667,34 @@ table.jobs-table{width:100%;border-collapse:collapse;font-size:.83rem}
     <div id="fcpError" class="error-text" style="font-size:.8rem;margin-bottom:8px;display:none"></div>
     <div class="form-actions">
       <button class="btn-primary" onclick="submitForceChangePassword()">Set new password</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reset Password Result Modal (shows one-time temp password) -->
+<div class="modal-overlay" id="resetPwResultModal">
+  <div class="modal" style="max-width:420px">
+    <h2>Password Reset</h2>
+    <p class="muted" style="margin-bottom:10px;font-size:.84rem">A temporary password has been generated for <strong id="resetPwUserName"></strong>. This is displayed <strong>once only</strong> — it cannot be retrieved after you close this dialog.</p>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:12px;font-family:'JetBrains Mono',monospace;font-size:.9rem;word-break:break-all;margin-bottom:14px" id="resetPwTempValue"></div>
+    <p class="muted" style="font-size:.78rem;margin-bottom:14px">The user will be required to set a new password on their next login.</p>
+    <div class="form-actions">
+      <button class="btn-primary" onclick="closeResetPwModal()">I've copied it — close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Change My Password Modal (self-service) -->
+<div class="modal-overlay" id="changeMyPwModal">
+  <div class="modal" style="max-width:400px">
+    <h2>Change my password</h2>
+    <div class="form-row"><label>Current password</label><input id="cmp-current" type="password"></div>
+    <div class="form-row"><label>New password <span class="muted">(min 8 chars)</span></label><input id="cmp-new" type="password"></div>
+    <div class="form-row"><label>Confirm new password</label><input id="cmp-confirm" type="password"></div>
+    <div id="cmpError" class="error-text" style="font-size:.8rem;margin-bottom:8px;display:none"></div>
+    <div class="form-actions">
+      <button class="btn-secondary" onclick="closeChangeMyPwModal()">Cancel</button>
+      <button class="btn-primary" onclick="submitChangeMyPassword()">Change password</button>
     </div>
   </div>
 </div>
@@ -1239,6 +1270,8 @@ function closeModal() {
   document.getElementById('groupModal').classList.remove('show');
   document.getElementById('membersModal').classList.remove('show');
   document.getElementById('svcDrillModal').classList.remove('show');
+  document.getElementById('resetPwResultModal').classList.remove('show');
+  document.getElementById('changeMyPwModal').classList.remove('show');
   document.getElementById('userModalInviteLink').classList.add('hidden');
   document.getElementById('userModalBtn').onclick = submitUserModal;
 }
@@ -2205,6 +2238,7 @@ async function loadUsers() {
             <button class="btn-sm" onclick="showEditUserModal(${u.id})">Edit</button>
             ${u.status !== 'disabled' ? `<button class="btn-sm" style="color:var(--red)" onclick="disableUser(${u.id})">Disable</button>` : ''}
             ${u.status === 'invited' ? `<button class="btn-sm" onclick="resendInvite(${u.id})">Resend invite</button>` : ''}
+           ${u.status === 'active' ? `<button class="btn-sm" onclick="resetUserPassword(${u.id}, '${esc(u.name)}')">Reset password</button>` : ''}
           </div>
         </td>
       </tr>`;
@@ -2348,6 +2382,55 @@ async function resendInvite(userId) {
   if (res.ok) {
     alert('New invite link:\n' + window.location.origin + data.invite_url);
   }
+}
+
+// ── Admin: Reset Password ─────────────────────────────────────────────────────
+async function resetUserPassword(userId, userName) {
+  if (!confirm(`Reset password for "${userName}"? A new temporary password will be generated.`)) return;
+  try {
+    const res = await fetch(`/api/users/${userId}/reset_password`, {method:'POST'});
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'Reset failed'); return; }
+    document.getElementById('resetPwUserName').textContent = userName;
+    document.getElementById('resetPwTempValue').textContent = data.temporary_password;
+    document.getElementById('resetPwResultModal').classList.add('show');
+  } catch { alert('Network error'); }
+}
+function closeResetPwModal() {
+  document.getElementById('resetPwResultModal').classList.remove('show');
+  document.getElementById('resetPwTempValue').textContent = '';
+}
+
+// ── Self-service: Change My Password ──────────────────────────────────────────
+function showChangeMyPasswordModal() {
+  document.getElementById('cmp-current').value = '';
+  document.getElementById('cmp-new').value = '';
+  document.getElementById('cmp-confirm').value = '';
+  document.getElementById('cmpError').style.display = 'none';
+  document.getElementById('changeMyPwModal').classList.add('show');
+}
+function closeChangeMyPwModal() {
+  document.getElementById('changeMyPwModal').classList.remove('show');
+}
+async function submitChangeMyPassword() {
+  const current = document.getElementById('cmp-current').value;
+  const newPw = document.getElementById('cmp-new').value;
+  const confirmPw = document.getElementById('cmp-confirm').value;
+  const errEl = document.getElementById('cmpError');
+  errEl.style.display = 'none';
+  if (newPw !== confirmPw) { errEl.textContent = 'New passwords do not match'; errEl.style.display = ''; return; }
+  if (newPw.length < 8) { errEl.textContent = 'New password must be at least 8 characters'; errEl.style.display = ''; return; }
+  try {
+    const res = await fetch('/api/auth/change_my_password', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({current_password: current, new_password: newPw})
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error || 'Error'; errEl.style.display = ''; return; }
+    closeChangeMyPwModal();
+    alert('Password changed successfully.');
+  } catch { errEl.textContent = 'Network error'; errEl.style.display = ''; }
 }
 
 // ── Group Modal ────────────────────────────────────────────────────────────────
